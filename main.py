@@ -1,5 +1,5 @@
 # ============================================================
-# GH V12 POLLING ENGINE + TELEGRAM NOTIFIER (SAFE & SECURE)
+# GH V12 POLLING ENGINE + FULL TELEGRAM CONTROL (/start, /stop, /status)
 # DELTA EXCHANGE INDIA V2 | ARCUSD
 # ============================================================
 
@@ -25,12 +25,13 @@ TP_PCT = SL_PCT * (0.70 / 0.30)
 COOLDOWN_SECONDS = 5
 MOMENTUM_LOOKBACK = 2
 
-# Render Environment Variables से ऑटो-लोड करेगा
 API_KEY = os.getenv("API_KEY", "UvOmLQABY3ppqe83KcPCWvfTxLkD8c")
 API_SECRET = os.getenv("API_SECRET", "05YCaLlNEM1C7qTxBGLYSICFsiP0viEv6g3zQILtLYguaPIgYF4DSJSJBpFP")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 CHAT_ID = os.getenv("CHAT_ID", "")
 
+# Bot Control State
+bot_active = True  # डिफ़ॉल्ट रूप से चालू रहेगा
 product_id = None
 tick_size = None
 candles = []
@@ -108,7 +109,7 @@ def load_product():
                 tick_size = float(result.get("tick_size", 0.00001))
                 msg = f"✅ PRODUCT LOADED: {SYMBOL} | ID: {product_id} | TICK: {tick_size}"
                 print(msg, flush=True)
-                send_telegram("🤖 GH-V12 Bot Started Successfully!\n" + msg)
+                send_telegram("🤖 GH-V12 Bot Online!\n" + msg)
                 return True
             except Exception:
                 pass
@@ -269,7 +270,51 @@ def execute_trade(side, price, er):
         with order_lock:
             order_in_progress = False
 
-print("STARTING INSTANT POLLING ENGINE...", flush=True)
+# Background Thread for Telegram Commands (/start, /stop, /status)
+def telegram_command_listener():
+    global bot_active
+    if not TELEGRAM_TOKEN:
+        return
+    
+    last_update_id = 0
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+    
+    while True:
+        try:
+            res = session.get(url, params={"offset": last_update_id + 1, "timeout": 5}, timeout=10)
+            data = res.json()
+            if data.get("ok") and data.get("result"):
+                for update in data["result"]:
+                    last_update_id = update["update_id"]
+                    msg = update.get("message", {})
+                    text = msg.get("text", "").strip().lower()
+                    sender_id = str(msg.get("chat", {}).get("id", ""))
+                    
+                    if CHAT_ID and sender_id != CHAT_ID:
+                        continue
+                        
+                    if text == "/stop":
+                        bot_active = False
+                        send_telegram("🔴 TRADING ENGINE STOPPED! New trades will not be placed.")
+                        print("🔴 BOT STOPPED VIA TELEGRAM", flush=True)
+                    elif text == "/start":
+                        bot_active = True
+                        send_telegram("🟢 TRADING ENGINE RESUMED! Monitoring signals...")
+                        print("🟢 BOT STARTED VIA TELEGRAM", flush=True)
+                    elif text == "/status":
+                        st = "🟢 RUNNING" if bot_active else "🔴 STOPPED"
+                        p = get_live_price()
+                        pos = get_position()
+                        pos_info = f"Size: {pos['size']} | Entry: {pos['entry_price']}" if pos else "None"
+                        send_telegram(f"🤖 Bot Status: {st}\nSymbol: {SYMBOL}\nPrice: {p}\nPosition: {pos_info}")
+        except Exception:
+            pass
+        time.sleep(1)
+
+# Start Command Listener Thread
+threading.Thread(target=telegram_command_listener, daemon=True).start()
+
+print("STARTING INSTANT POLLING ENGINE WITH COMMAND LISTENER...", flush=True)
 if not load_product():
     print("❌ Failed to load product. Check connection.", flush=True)
     send_telegram("❌ Failed to load product. Check connection.")
@@ -292,10 +337,14 @@ while True:
             last_candle_fetch = time.time()
 
         signal, er = get_signal(price)
-        print(f"PRICE: {price:.8f} | ER: {er:.4f} | EXEC_SIGNAL: {signal.upper()}", flush=True)
         
-        if time.time() - last_trade_time > COOLDOWN_SECONDS:
-            execute_trade(signal, price, er)
+        # केवल तभी ट्रेड करेगा जब bot_active True होगा
+        if bot_active:
+            print(f"PRICE: {price:.8f} | ER: {er:.4f} | EXEC_SIGNAL: {signal.upper()}", flush=True)
+            if time.time() - last_trade_time > COOLDOWN_SECONDS:
+                execute_trade(signal, price, er)
+        else:
+            print(f"PAUSED ⏸️ | PRICE: {price:.8f}", flush=True)
             
         time.sleep(0.3)
     except KeyboardInterrupt:
