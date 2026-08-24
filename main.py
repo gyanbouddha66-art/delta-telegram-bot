@@ -1,6 +1,7 @@
 # ============================================================
-# GH V12 ENGINE - VWAP + PRICE ACTION + CANDLESTICK PATTERNS
+# GH V12 ENGINE - INVERSE STRATEGY (BUY->SELL | SELL->BUY)
 # DELTA EXCHANGE INDIA V2 | ARCUSD
+# 1:1 RISK REWARD (SL 0.5% | TP 0.5%)
 # ============================================================
 
 import os
@@ -17,8 +18,9 @@ BASE_URL = "https://api.india.delta.exchange"
 SYMBOL = "ARCUSD"
 LOT_SIZE = 5                      # 5 लॉट सेट हैं
 
-SL_PCT = 0.004                    # 0.4% Stop Loss
-TP_PCT = SL_PCT * (0.70 / 0.30)   # 0.93% Take Profit
+# SL और TP को बढ़ाकर 0.5% किया और 1:1 रेश्यो सेट किया
+SL_PCT = 0.005                    # 0.5% Stop Loss
+TP_PCT = 0.005                    # 0.5% Take Profit (1:1 Equal SL/TP)
 COOLDOWN_SECONDS = 10
 
 API_KEY = os.getenv("API_KEY", "UvOmLQABY3ppqe83KcPCWvfTxLkD8c")
@@ -41,7 +43,7 @@ initial_wallet_balance = 0.0
 last_valid_balance = 0.0
 
 # VWAP & Candle Buffers
-price_history = []      # Memory for tick candles
+price_history = []
 volume_history = []
 cum_volume = 0.0
 cum_pv = 0.0
@@ -53,7 +55,7 @@ recent_swing_low = None
 session = requests.Session()
 adapter = requests.adapters.HTTPAdapter(max_retries=3, pool_connections=10, pool_maxsize=10)
 session.mount("https://", adapter)
-session.headers.update({"User-Agent": "GH-V12-LiveSMC/10.0", "Accept": "application/json"})
+session.headers.update({"User-Agent": "GH-V12-InverseSMC/10.0", "Accept": "application/json"})
 
 # ------------------------------------------------------------
 # DUMMY FLASK SERVER FOR RENDER FREE TIER
@@ -62,7 +64,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "SMC VWAP Engine is Live and Running 24/7!"
+    return "SMC Inverse VWAP Engine is Live and Running 24/7!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -153,7 +155,7 @@ def load_product():
                 product_id = int(result["id"])
                 tick_size = float(result.get("tick_size", 0.00001))
                 initial_wallet_balance = get_wallet_balance()
-                msg = f"✅ VWAP & CANDLESTICK ENGINE ONLINE!\nSymbol: {SYMBOL}\nLots: {LOT_SIZE}\nInitial Balance: ${initial_wallet_balance:.2f}"
+                msg = f"✅ INVERSE ENGINE ONLINE!\nSymbol: {SYMBOL}\nLots: {LOT_SIZE}\nMode: ULTA TRADING (BUY->SELL, SELL->BUY)\nSL: 0.5% | TP: 0.5%\nInitial Balance: ${initial_wallet_balance:.2f}"
                 print(msg, flush=True)
                 send_telegram(msg)
                 return True
@@ -176,12 +178,11 @@ def get_live_ticker_data():
     return None, 1.0
 
 # ------------------------------------------------------------
-# VWAP & CANDLESTICK STRATEGY LOGIC
+# VWAP & CANDLESTICK INVERSE STRATEGY LOGIC
 # ------------------------------------------------------------
 def update_vwap_and_candles(price, volume):
     global cum_volume, cum_pv, vwap_price, recent_swing_high, recent_swing_low
     
-    # VWAP Calculation
     cum_volume += volume
     cum_pv += price * volume
     if cum_volume > 0:
@@ -189,12 +190,10 @@ def update_vwap_and_candles(price, volume):
     else:
         vwap_price = price
 
-    # Update Ticks for Candlesticks
     price_history.append(price)
     if len(price_history) > 30:
         price_history.pop(0)
 
-    # Dynamic Swings
     if recent_swing_high is None or recent_swing_low is None:
         recent_swing_high = price * 1.0008
         recent_swing_low = price * 0.9992
@@ -209,9 +208,7 @@ def check_candlestick_pattern():
     p_curr = price_history[-1]
     p_prev = price_history[-2]
     p_prev2 = price_history[-3]
-    p_open = price_history[-4]
 
-    # Bullish Engulfing / Hammer Simulation
     is_bullish_candle = p_curr > p_prev and p_prev <= p_prev2
     is_bearish_candle = p_curr < p_prev and p_prev >= p_prev2
 
@@ -230,15 +227,15 @@ def get_vwap_pa_signal(price):
 
     candle_pattern = check_candlestick_pattern()
 
-    # BUY SIGNAL: Price > VWAP + Bullish Pattern + Break Above Swing
+    # ORIGINAL BUY CONDITION -> INVERSE TO SELL
     if price > vwap_price and candle_pattern == "bullish" and price >= recent_swing_high:
         recent_swing_high = price * 1.0015
-        return "buy"
+        return "sell"  # <-- ULTA: Buy condition par Sell trade
 
-    # SELL SIGNAL: Price < VWAP + Bearish Pattern + Break Below Swing
+    # ORIGINAL SELL CONDITION -> INVERSE TO BUY
     elif price < vwap_price and candle_pattern == "bearish" and price <= recent_swing_low:
         recent_swing_low = price * 0.9985
-        return "sell"
+        return "buy"   # <-- ULTA: Sell condition par Buy trade
 
     return "none"
 
@@ -269,7 +266,7 @@ def place_market_order(side):
         "size": LOT_SIZE, 
         "side": side, 
         "order_type": "market_order", 
-        "client_order_id": "GH_VWAP_" + str(int(time.time()))
+        "client_order_id": "GH_INV_" + str(int(time.time()))
     }
     return private_request("POST", "/v2/orders", body=body)
 
@@ -292,6 +289,7 @@ def round_price(price):
     return round(price, 8)
 
 def place_bracket(entry_price, side):
+    # Equal 1:1 SL and TP (0.5% each)
     if side == "buy":
         sl, tp = entry_price * (1 - SL_PCT), entry_price * (1 + TP_PCT)
     else:
@@ -345,7 +343,7 @@ def monitor_trade_outcome(entry_price, side, prev_bal):
         report = (
             f"{status_text}\n"
             f"-----------------------------\n"
-            f"📊 Side: {side.upper()} | Lots: {LOT_SIZE}\n"
+            f"📊 Side: {side.upper()} (INVERSE) | Lots: {LOT_SIZE}\n"
             f"💰 Trade PnL: ${pnl:+.2f}\n"
             f"🏆 Wins: {w_cnt} | ❌ Losses: {l_cnt}\n"
             f"📈 Win Rate: {w_rt:.1f}%\n"
@@ -394,11 +392,11 @@ def execute_trade(side, price):
             tp_val = round_price(entry * (1 - TP_PCT))
 
         success_msg = (
-            f"⚡ VWAP + PA TRADE EXECUTED!\n"
+            f"⚡ INVERSE TRADE EXECUTED!\n"
             f"Side: {side.upper()} | Lots: {LOT_SIZE}\n"
             f"Entry: {entry:.8f}\n"
-            f"VWAP Level: {vwap_price:.8f}\n"
-            f"SL: {sl_val:.8f} | TP: {tp_val:.8f}\n"
+            f"SL (0.5%): {sl_val:.8f}\n"
+            f"TP (0.5%): {tp_val:.8f}\n"
             f"Wallet Balance: ${prev_bal:.2f}\n"
             f"⏳ Monitoring Position..."
         )
@@ -439,10 +437,10 @@ def telegram_command_listener():
                             
                         if text == "/stop":
                             bot_active = False
-                            send_telegram("🔴 ENGINE PAUSED!")
+                            send_telegram("🔴 INVERSE ENGINE PAUSED!")
                         elif text == "/start":
                             bot_active = True
-                            send_telegram("🟢 ENGINE RESUMED!")
+                            send_telegram("🟢 INVERSE ENGINE RESUMED!")
                         elif text == "/reset":
                             with order_lock:
                                 order_in_progress = False
@@ -459,6 +457,7 @@ def telegram_command_listener():
                             
                             report = (
                                 f"🤖 BOT STATUS: {st}\n"
+                                f"📍 Mode: INVERSE (Opposite Trades)\n"
                                 f"📍 Position: {pos_status}\n"
                                 f"📊 Live VWAP: {vwap_str}\n"
                                 f"-----------------------------\n"
@@ -477,9 +476,9 @@ def telegram_command_listener():
 threading.Thread(target=telegram_command_listener, daemon=True).start()
 
 # ------------------------------------------------------------
-# MAIN AUTO-RECOVERY TICK LOOP
+# MAIN LOOP
 # ------------------------------------------------------------
-print("STARTING VWAP + PA + CANDLESTICK ENGINE...", flush=True)
+print("STARTING INVERSE VWAP ENGINE...", flush=True)
 if not load_product():
     raise SystemExit
 
