@@ -1,5 +1,5 @@
 # ============================================================
-# GH V12 SMC ENGINE - AUTO-RECOVERY & HEAVY FAULT TOLERANCE
+# GH V12 ENGINE - VWAP + PRICE ACTION + CANDLESTICK PATTERNS
 # DELTA EXCHANGE INDIA V2 | ARCUSD
 # ============================================================
 
@@ -11,6 +11,7 @@ import hmac
 import hashlib
 import threading
 import math
+from flask import Flask
 
 BASE_URL = "https://api.india.delta.exchange"
 SYMBOL = "ARCUSD"
@@ -39,8 +40,13 @@ losses_count = 0
 initial_wallet_balance = 0.0
 last_valid_balance = 0.0
 
-live_high = None
-live_low = None
+# VWAP & Candle Buffers
+price_history = []      # Memory for tick candles
+volume_history = []
+cum_volume = 0.0
+cum_pv = 0.0
+vwap_price = None
+
 recent_swing_high = None
 recent_swing_low = None
 
@@ -49,6 +55,24 @@ adapter = requests.adapters.HTTPAdapter(max_retries=3, pool_connections=10, pool
 session.mount("https://", adapter)
 session.headers.update({"User-Agent": "GH-V12-LiveSMC/10.0", "Accept": "application/json"})
 
+# ------------------------------------------------------------
+# DUMMY FLASK SERVER FOR RENDER FREE TIER
+# ------------------------------------------------------------
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "SMC VWAP Engine is Live and Running 24/7!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+threading.Thread(target=run_flask, daemon=True).start()
+
+# ------------------------------------------------------------
+# HELPER FUNCTIONS
+# ------------------------------------------------------------
 def send_telegram(message):
     if not TELEGRAM_TOKEN or not CHAT_ID:
         return
@@ -129,7 +153,7 @@ def load_product():
                 product_id = int(result["id"])
                 tick_size = float(result.get("tick_size", 0.00001))
                 initial_wallet_balance = get_wallet_balance()
-                msg = f"✅ SMC ENGINE ONLINE!\nSymbol: {SYMBOL}\nLots: {LOT_SIZE}\nInitial Balance: ${initial_wallet_balance:.2f}"
+                msg = f"✅ VWAP & CANDLESTICK ENGINE ONLINE!\nSymbol: {SYMBOL}\nLots: {LOT_SIZE}\nInitial Balance: ${initial_wallet_balance:.2f}"
                 print(msg, flush=True)
                 send_telegram(msg)
                 return True
@@ -138,53 +162,89 @@ def load_product():
         time.sleep(1)
     return False
 
-def get_live_price():
+def get_live_ticker_data():
     data = public_get(f"/v2/tickers/{SYMBOL}")
     if data and isinstance(data, dict) and "result" in data:
         res = data["result"]
+        price = None
         for k in ("mark_price", "spot_price", "close"):
-            val = res.get(k)
-            if val is not None:
-                return float(val)
-    return None
+            if res.get(k) is not None:
+                price = float(res.get(k))
+                break
+        vol = float(res.get("volume", 1.0))
+        return price, vol
+    return None, 1.0
 
-def update_live_price_levels(price):
-    global live_high, live_low, recent_swing_high, recent_swing_low
+# ------------------------------------------------------------
+# VWAP & CANDLESTICK STRATEGY LOGIC
+# ------------------------------------------------------------
+def update_vwap_and_candles(price, volume):
+    global cum_volume, cum_pv, vwap_price, recent_swing_high, recent_swing_low
     
-    if live_high is None or live_low is None:
-        live_high = price
-        live_low = price
-        recent_swing_high = price * 1.001
-        recent_swing_low = price * 0.999
-        return
+    # VWAP Calculation
+    cum_volume += volume
+    cum_pv += price * volume
+    if cum_volume > 0:
+        vwap_price = cum_pv / cum_volume
+    else:
+        vwap_price = price
 
-    if price > live_high:
-        live_high = price
-    if price < live_low:
-        live_low = price
+    # Update Ticks for Candlesticks
+    price_history.append(price)
+    if len(price_history) > 30:
+        price_history.pop(0)
 
-    recent_swing_high = max(recent_swing_high, live_high)
-    recent_swing_low = min(recent_swing_low, live_low)
-
-def get_price_action_signal(price):
-    global recent_swing_high, recent_swing_low, live_high, live_low
-    
+    # Dynamic Swings
     if recent_swing_high is None or recent_swing_low is None:
+        recent_swing_high = price * 1.0008
+        recent_swing_low = price * 0.9992
+    else:
+        recent_swing_high = max(recent_swing_high, price)
+        recent_swing_low = min(recent_swing_low, price)
+
+def check_candlestick_pattern():
+    if len(price_history) < 5:
         return "none"
 
-    if price >= recent_swing_high:
-        recent_swing_high = price * 1.002
-        live_high = price
-        live_low = price
-        return "buy"
-    elif price <= recent_swing_low:
-        recent_swing_low = price * 0.998
-        live_high = price
-        live_low = price
-        return "sell"
-        
+    p_curr = price_history[-1]
+    p_prev = price_history[-2]
+    p_prev2 = price_history[-3]
+    p_open = price_history[-4]
+
+    # Bullish Engulfing / Hammer Simulation
+    is_bullish_candle = p_curr > p_prev and p_prev <= p_prev2
+    is_bearish_candle = p_curr < p_prev and p_prev >= p_prev2
+
+    if is_bullish_candle:
+        return "bullish"
+    elif is_bearish_candle:
+        return "bearish"
+
     return "none"
 
+def get_vwap_pa_signal(price):
+    global recent_swing_high, recent_swing_low, vwap_price
+    
+    if vwap_price is None or recent_swing_high is None or recent_swing_low is None:
+        return "none"
+
+    candle_pattern = check_candlestick_pattern()
+
+    # BUY SIGNAL: Price > VWAP + Bullish Pattern + Break Above Swing
+    if price > vwap_price and candle_pattern == "bullish" and price >= recent_swing_high:
+        recent_swing_high = price * 1.0015
+        return "buy"
+
+    # SELL SIGNAL: Price < VWAP + Bearish Pattern + Break Below Swing
+    elif price < vwap_price and candle_pattern == "bearish" and price <= recent_swing_low:
+        recent_swing_low = price * 0.9985
+        return "sell"
+
+    return "none"
+
+# ------------------------------------------------------------
+# ORDER EXECUTION & MONITORING
+# ------------------------------------------------------------
 def get_position():
     if not product_id:
         return None
@@ -209,7 +269,7 @@ def place_market_order(side):
         "size": LOT_SIZE, 
         "side": side, 
         "order_type": "market_order", 
-        "client_order_id": "GH_PRICE_" + str(int(time.time()))
+        "client_order_id": "GH_VWAP_" + str(int(time.time()))
     }
     return private_request("POST", "/v2/orders", body=body)
 
@@ -334,9 +394,10 @@ def execute_trade(side, price):
             tp_val = round_price(entry * (1 - TP_PCT))
 
         success_msg = (
-            f"⚡ NEW TRADE EXECUTED!\n"
+            f"⚡ VWAP + PA TRADE EXECUTED!\n"
             f"Side: {side.upper()} | Lots: {LOT_SIZE}\n"
             f"Entry: {entry:.8f}\n"
+            f"VWAP Level: {vwap_price:.8f}\n"
             f"SL: {sl_val:.8f} | TP: {tp_val:.8f}\n"
             f"Wallet Balance: ${prev_bal:.2f}\n"
             f"⏳ Monitoring Position..."
@@ -351,6 +412,9 @@ def execute_trade(side, price):
         with order_lock:
             order_in_progress = False
 
+# ------------------------------------------------------------
+# TELEGRAM LISTENER
+# ------------------------------------------------------------
 def telegram_command_listener():
     global bot_active, order_in_progress
     if not TELEGRAM_TOKEN:
@@ -387,6 +451,7 @@ def telegram_command_listener():
                             st = "🟢 RUNNING" if bot_active else "🔴 PAUSED"
                             cur_bal = get_wallet_balance()
                             pos_status = "In Position" if has_position() else "No Active Position"
+                            vwap_str = f"{vwap_price:.8f}" if vwap_price else "Calculating..."
                             with stats_lock:
                                 w_cnt, l_cnt = wins_count, losses_count
                             total_trades = w_cnt + l_cnt
@@ -395,6 +460,7 @@ def telegram_command_listener():
                             report = (
                                 f"🤖 BOT STATUS: {st}\n"
                                 f"📍 Position: {pos_status}\n"
+                                f"📊 Live VWAP: {vwap_str}\n"
                                 f"-----------------------------\n"
                                 f"🏆 Wins: {w_cnt} | ❌ Losses: {l_cnt}\n"
                                 f"📈 Win Rate: {wr:.1f}%\n"
@@ -410,20 +476,22 @@ def telegram_command_listener():
 
 threading.Thread(target=telegram_command_listener, daemon=True).start()
 
-print("STARTING AUTO-RECOVERING SMC ENGINE...", flush=True)
+# ------------------------------------------------------------
+# MAIN AUTO-RECOVERY TICK LOOP
+# ------------------------------------------------------------
+print("STARTING VWAP + PA + CANDLESTICK ENGINE...", flush=True)
 if not load_product():
     raise SystemExit
 
-# Infinite Auto-Recovery Main Loop
 while True:
     try:
-        price = get_live_price()
+        price, vol = get_live_ticker_data()
         if price is None:
             time.sleep(0.3)
             continue
 
-        update_live_price_levels(price)
-        signal = get_price_action_signal(price)
+        update_vwap_and_candles(price, vol)
+        signal = get_vwap_pa_signal(price)
         
         if bot_active:
             if signal in ("buy", "sell") and time.time() - last_trade_time > COOLDOWN_SECONDS:
@@ -432,5 +500,5 @@ while True:
     except KeyboardInterrupt:
         break
     except Exception as e:
-        print(f"⚠️ Loop Recovered from Exception: {e}", flush=True)
+        print(f"⚠️ Loop Exception Recovered: {e}", flush=True)
         time.sleep(1)
