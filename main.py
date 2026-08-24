@@ -1,7 +1,7 @@
 # ============================================================
-# ULTRA-FAST 50-STRATEGY ENSEMBLE ENGINE (MAX SPEED EDITION)
+# HYPER-FAST 50-STRATEGY ENGINE (ULTRA-LOW THRESHOLD = 3)
 # DELTA EXCHANGE INDIA V2 | ARCUSD (1-MIN TIMEFRAME)
-# FEATURES: Low Threshold 20/50 (40%), 100ms Execution Loop, Fast Telegram & Terminal Updates
+# FEATURES: Extremely Low Threshold (3/50 - 6%), 100ms Loop Execution
 # ============================================================
 
 import os
@@ -18,9 +18,9 @@ BASE_URL = "https://api.india.delta.exchange"
 SYMBOL = "ARCUSD"
 LOT_SIZE = 1                      # Lot Size
 
-COOLDOWN_SECONDS = 5              # Cooldown reduced to 5s
+COOLDOWN_SECONDS = 3              # 3 सेकंड का कूलडाउन (ताकि ओवरलैप न हो)
 CANDLE_TIMEFRAME_SEC = 60         # 1-Minute Timeframe
-SCORE_THRESHOLD = 20              # 40% Score Threshold (Super Fast Execution Trigger)
+SCORE_THRESHOLD = 3               # ⚡ 3 SCORE THRESHOLD (6% Confluence Instant Trigger)
 
 ATR_PERIOD = 14
 ATR_MULTIPLIER_SL = 1.5           # Trailing Stop-Loss = 1.5 x ATR
@@ -56,7 +56,7 @@ last_score_telegram_time = 0
 session = requests.Session()
 adapter = requests.adapters.HTTPAdapter(max_retries=2, pool_connections=20, pool_maxsize=20)
 session.mount("https://", adapter)
-session.headers.update({"User-Agent": "Fast-50Engine/3.0", "Accept": "application/json"})
+session.headers.update({"User-Agent": "Hyper-3Engine/4.0", "Accept": "application/json"})
 
 # ------------------------------------------------------------
 # FLASK SERVER FOR UPTIME
@@ -65,7 +65,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Ultra-Fast 50-Strategy Engine Live 24/7!"
+    return "Hyper-Fast Engine Live (Threshold 3) 24/7!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -182,9 +182,9 @@ def load_product():
                 initial_wallet_balance = get_wallet_balance()
                 fetch_historical_candles()
                 msg = (
-                    f"⚡ ULTRA-FAST 50-STRATEGY ENGINE ONLINE!\n"
+                    f"⚡ HYPER-FAST ENGINE ONLINE!\n"
                     f"Symbol: {SYMBOL} | Lots: {LOT_SIZE}\n"
-                    f"Threshold: {SCORE_THRESHOLD}/50 (Fast Mode 40%)\n"
+                    f"Threshold: {SCORE_THRESHOLD}/50 (Instant Trigger Mode)\n"
                     f"Balance: ${initial_wallet_balance:.2f}"
                 )
                 print(msg, flush=True)
@@ -356,7 +356,7 @@ def evaluate_50_strategies(price, candles):
     latest_bull_score = bullish_score
     latest_bear_score = bearish_score
 
-    # FAST THRESHOLD (20)
+    # THRESHOLD = 3
     if bullish_score >= SCORE_THRESHOLD and bullish_score > bearish_score:
         return "buy", atr, bullish_score, bearish_score
     elif bearish_score >= SCORE_THRESHOLD and bearish_score > bullish_score:
@@ -500,7 +500,7 @@ def place_market_order(side):
         "size": LOT_SIZE, 
         "side": side, 
         "order_type": "market_order", 
-        "client_order_id": "FAST50_" + str(int(time.time()))
+        "client_order_id": "INSTANT3_" + str(int(time.time()))
     }
     return private_request("POST", "/v2/orders", body=body)
 
@@ -537,9 +537,9 @@ def execute_trade(side, price, atr, score):
         entry = pos["entry_price"]
 
         msg = (
-            f"⚡ FAST TRADE EXECUTED!\n"
+            f"⚡ INSTANT TRADE EXECUTED!\n"
             f"Side: {side.upper()} | Lots: {LOT_SIZE}\n"
-            f"Confluence Score: {score}/50\n"
+            f"Confluence Score: {score}/50 (Min Target: 3)\n"
             f"Entry Price: {entry:.5f}\n"
             f"Balance: ${prev_bal:.2f}"
         )
@@ -554,7 +554,7 @@ def execute_trade(side, price, atr, score):
             order_in_progress = False
 
 # ------------------------------------------------------------
-# TELEGRAM LISTENERS & AUTO SCORE BROADCASTER
+# TELEGRAM LISTENERS & AUTO BROADCASTER
 # ------------------------------------------------------------
 def send_status_report():
     st = "🟢 RUNNING" if bot_active else "🔴 PAUSED"
@@ -618,9 +618,9 @@ def telegram_command_listener():
 threading.Thread(target=telegram_command_listener, daemon=True).start()
 
 # ------------------------------------------------------------
-# MAIN EXECUTION LOOP (100ms Speed)
+# MAIN EXECUTION LOOP (100ms)
 # ------------------------------------------------------------
-print("STARTING ULTRA-FAST 50-STRATEGY ENGINE...", flush=True)
+print("STARTING HYPER-FAST ENGINE (THRESHOLD = 3)...", flush=True)
 if not load_product():
     raise SystemExit
 
