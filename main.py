@@ -1,5 +1,5 @@
 # ============================================================
-# RSI CROSSOVER ENGINE (RSI 5 vs RSI 14)
+# RSI CROSSOVER ENGINE (RSI 5 vs RSI 14) - RENDER FREE FIX
 # DELTA EXCHANGE INDIA V2 | ARCUSD (1-MIN TIMEFRAME)
 # ============================================================
 
@@ -62,19 +62,13 @@ session.mount("https://", adapter)
 session.headers.update({"User-Agent": "RSICrossover-Engine/1.0", "Accept": "application/json"})
 
 # ------------------------------------------------------------
-# FLASK SERVER FOR UPTIME
+# FLASK SERVER FOR RENDER PORT BINDING (UPTIME)
 # ------------------------------------------------------------
 app = Flask('')
 
 @app.route('/')
 def home():
     return "RSI 5/14 Crossover Engine Live 24/7!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-threading.Thread(target=run_flask, daemon=True).start()
 
 # ------------------------------------------------------------
 # HELPER & API FUNCTIONS
@@ -210,7 +204,7 @@ def get_live_ticker_data():
     return None
 
 # ------------------------------------------------------------
-# INDICATORS (RSI & ATR)
+# INDICATORS & CROSSOVER LOGIC
 # ------------------------------------------------------------
 def calculate_rsi(candles, period=14):
     if len(candles) < period + 1:
@@ -237,31 +231,23 @@ def calculate_atr(candles, period=14):
         tr_list.append(tr)
     return sum(tr_list[-period:]) / period
 
-# ------------------------------------------------------------
-# CROSSOVER SIGNAL LOGIC
-# ------------------------------------------------------------
 def evaluate_rsi_crossover(candles):
     global latest_rsi5, latest_rsi14, prev_rsi5, prev_rsi14
     
     if len(candles) < 20:
         return "none", 0.0
 
-    # Calculate current RSI
     latest_rsi5 = calculate_rsi(candles, RSI_FAST_PERIOD)
     latest_rsi14 = calculate_rsi(candles, RSI_SLOW_PERIOD)
     
-    # Calculate previous candle RSI to verify crossover
     prev_candles = candles[:-1]
     prev_rsi5 = calculate_rsi(prev_candles, RSI_FAST_PERIOD)
     prev_rsi14 = calculate_rsi(prev_candles, RSI_SLOW_PERIOD)
     
     atr = calculate_atr(candles, ATR_PERIOD)
 
-    # Bullish Crossover: RSI(5) crosses ABOVE RSI(14)
     if prev_rsi5 <= prev_rsi14 and latest_rsi5 > latest_rsi14:
         return "buy", atr
-
-    # Bearish Crossover: RSI(5) crosses BELOW RSI(14)
     elif prev_rsi5 >= prev_rsi14 and latest_rsi5 < latest_rsi14:
         return "sell", atr
 
@@ -521,35 +507,46 @@ def telegram_command_listener():
 threading.Thread(target=telegram_command_listener, daemon=True).start()
 
 # ------------------------------------------------------------
-# MAIN EXECUTION LOOP (100ms)
+# MAIN BOT ENGINE LOOP (Runs in Background)
 # ------------------------------------------------------------
-print("STARTING RSI 5/14 CROSSOVER ENGINE...", flush=True)
-if not load_product():
-    raise SystemExit
+def start_trading_engine():
+    print("STARTING RSI 5/14 CROSSOVER ENGINE...", flush=True)
+    if not load_product():
+        print("❌ Product loading failed, retrying...", flush=True)
+        return
 
-last_score_telegram_time = time.time()
+    last_score_telegram_time = time.time()
 
-while True:
-    try:
-        price = get_live_ticker_data()
-        if price is None:
+    while True:
+        try:
+            price = get_live_ticker_data()
+            if price is None:
+                time.sleep(0.1)
+                continue
+
+            signal, atr_val = process_tick_and_detect_signal(price)
+            print(f"⏱️ P: {price:.5f} | RSI(5): {latest_rsi5:.1f} | RSI(14): {latest_rsi14:.1f} | Sig: {signal}", flush=True)
+
+            if time.time() - last_score_telegram_time >= 300:
+                send_status_report()
+                last_score_telegram_time = time.time()
+
+            if bot_active:
+                if signal in ("buy", "sell") and time.time() - last_trade_time > COOLDOWN_SECONDS:
+                    execute_trade(signal, price, atr_val)
             time.sleep(0.1)
-            continue
+        except KeyboardInterrupt:
+            break
+        except Exception as e:
+            print(f"⚠️ Loop Exception: {e}", flush=True)
+            time.sleep(0.1)
 
-        signal, atr_val = process_tick_and_detect_signal(price)
-        
-        print(f"⏱️ P: {price:.5f} | RSI(5): {latest_rsi5:.1f} | RSI(14): {latest_rsi14:.1f} | Sig: {signal}", flush=True)
+# Start Bot Loop asynchronously
+threading.Thread(target=start_trading_engine, daemon=True).start()
 
-        if time.time() - last_score_telegram_time >= 300:
-            send_status_report()
-            last_score_telegram_time = time.time()
-
-        if bot_active:
-            if signal in ("buy", "sell") and time.time() - last_trade_time > COOLDOWN_SECONDS:
-                execute_trade(signal, price, atr_val)
-        time.sleep(0.1)
-    except KeyboardInterrupt:
-        break
-    except Exception as e:
-        print(f"⚠️ Loop Exception: {e}", flush=True)
-        time.sleep(0.1)
+# ------------------------------------------------------------
+# START FLASK SERVER IMMEDIATELY (Satisfies Render Free Tier)
+# ------------------------------------------------------------
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
