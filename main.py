@@ -1,7 +1,8 @@
 # ============================================================
-# PURE CANDLESTICK INVERSE ENGINE (NO FILTERS)
+# ULTRAFAST PRICE-BASED CANDLESTICK INVERSE ENGINE
 # DELTA EXCHANGE INDIA V2 | ARCUSD
 # BUY SIGNAL -> SELL | SELL SIGNAL -> BUY
+# ZERO GRAPHICS - PURE NUMERICAL OHLC COMPUTATION
 # ============================================================
 
 import os
@@ -20,7 +21,9 @@ LOT_SIZE = 3                      # 3 Lots Set
 
 SL_PCT = 0.005                    # 0.5% Stop Loss
 TP_PCT = 0.005                    # 0.5% Take Profit (1:1)
-COOLDOWN_SECONDS = 10
+COOLDOWN_SECONDS = 5              # Fast Execution Cooldown
+
+CANDLE_TIMEFRAME_SEC = 5          # 5-second micro-candles for ultra-fast signal generation
 
 API_KEY = os.getenv("API_KEY", "UvOmLQABY3ppqe83KcPCWvfTxLkD8c")
 API_SECRET = os.getenv("API_SECRET", "05YCaLlNEM1C7qTxBGLYSICFsiP0viEv6g3zQILtLYguaPIgYF4DSJSJBpFP")
@@ -40,12 +43,16 @@ losses_count = 0
 initial_wallet_balance = 0.0
 last_valid_balance = 0.0
 
-price_history = []
+# ------------------------------------------------------------
+# IN-MEMORY OHLC CANDLE GENERATOR (NO GRAPHICS / ULTRAFAST)
+# ------------------------------------------------------------
+current_candle = None             # Stores {'open', 'high', 'low', 'close', 'start_time'}
+closed_candles = []               # Stores array of completed OHLC dictionaries
 
 session = requests.Session()
 adapter = requests.adapters.HTTPAdapter(max_retries=3, pool_connections=10, pool_maxsize=10)
 session.mount("https://", adapter)
-session.headers.update({"User-Agent": "PureCandle-Inverse/1.0", "Accept": "application/json"})
+session.headers.update({"User-Agent": "UltrafastCandle-Inverse/1.0", "Accept": "application/json"})
 
 # ------------------------------------------------------------
 # DUMMY FLASK SERVER
@@ -54,7 +61,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Pure Candlestick Inverse Engine is Live 24/7!"
+    return "Ultrafast Price Candlestick Engine is Live 24/7!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -145,7 +152,14 @@ def load_product():
                 product_id = int(result["id"])
                 tick_size = float(result.get("tick_size", 0.00001))
                 initial_wallet_balance = get_wallet_balance()
-                msg = f"✅ PURE CANDLESTICK INVERSE ENGINE ONLINE!\nSymbol: {SYMBOL}\nLots: {LOT_SIZE}\nFilter: NONE (Pure Candlestick)\nMode: ULTA TRADING (Bullish->SELL, Bearish->BUY)\nSL: 0.5% | TP: 0.5%\nBalance: ${initial_wallet_balance:.2f}"
+                msg = (
+                    f"⚡ ULTRAFAST PRICE-CANDLE INVERSE ENGINE ONLINE!\n"
+                    f"Symbol: {SYMBOL} | Lots: {LOT_SIZE}\n"
+                    f"Timeframe: {CANDLE_TIMEFRAME_SEC}s Micro-Candles (Numerical OHLC)\n"
+                    f"Mode: ULTA TRADING (Bullish Candle -> SELL, Bearish Candle -> BUY)\n"
+                    f"SL: 0.5% | TP: 0.5%\n"
+                    f"Balance: ${initial_wallet_balance:.2f}"
+                )
                 print(msg, flush=True)
                 send_telegram(msg)
                 return True
@@ -167,30 +181,73 @@ def get_live_ticker_data():
     return None
 
 # ------------------------------------------------------------
-# PURE CANDLESTICK LOGIC (WITHOUT FILTERS)
+# LIVE TICK TO OHLC BUILDER & PATTERN DETECTOR
 # ------------------------------------------------------------
-def get_pure_candlestick_signal(price):
-    price_history.append(price)
-    if len(price_history) > 10:
-        price_history.pop(0)
+def process_tick_and_detect_pattern(price):
+    global current_candle, closed_candles
+    now = time.time()
 
-    if len(price_history) < 3:
+    if current_candle is None:
+        current_candle = {
+            "open": price,
+            "high": price,
+            "low": price,
+            "close": price,
+            "start_time": now
+        }
         return "none"
 
-    p_curr = price_history[-1]
-    p_prev = price_history[-2]
-    p_prev2 = price_history[-3]
+    # Update ongoing micro-candle OHLC
+    current_candle["high"] = max(current_candle["high"], price)
+    current_candle["low"] = min(current_candle["low"], price)
+    current_candle["close"] = price
 
-    if p_curr > p_prev and p_prev <= p_prev2:
-        return "sell"  # ULTA TRADING
+    # Check if timeframe duration reached
+    if now - current_candle["start_time"] >= CANDLE_TIMEFRAME_SEC:
+        closed_candles.append(current_candle.copy())
+        if len(closed_candles) > 10:
+            closed_candles.pop(0)
 
-    elif p_curr < p_prev and p_prev >= p_prev2:
-        return "buy"   # ULTA TRADING
+        # Reset new candle
+        current_candle = {
+            "open": price,
+            "high": price,
+            "low": price,
+            "close": price,
+            "start_time": now
+        }
+
+        # Analyze closed candles for Patterns
+        if len(closed_candles) >= 2:
+            c_curr = closed_candles[-1]
+            c_prev = closed_candles[-2]
+
+            curr_open, curr_close = c_curr["open"], c_curr["close"]
+            curr_high, curr_low = c_curr["high"], c_curr["low"]
+            
+            prev_open, prev_close = c_prev["open"], c_prev["close"]
+
+            curr_body = abs(curr_close - curr_open)
+            prev_body = abs(prev_close - prev_open)
+
+            # 1. BULLISH PATTERNS (Bullish Engulfing or Bullish Candle)
+            is_bullish_engulfing = (curr_close > curr_open) and (prev_close < prev_open) and (curr_body > prev_body)
+            is_strong_bullish = (curr_close > curr_open) and (curr_close > prev_high if 'prev_high' in locals() else curr_close > prev_open)
+
+            if is_bullish_engulfing or is_strong_bullish:
+                return "sell"  # <--- ULTA: Bullish pattern triggers SELL
+
+            # 2. BEARISH PATTERNS (Bearish Engulfing or Bearish Candle)
+            is_bearish_engulfing = (curr_close < curr_open) and (prev_close > prev_open) and (curr_body > prev_body)
+            is_strong_bearish = (curr_close < curr_open) and (curr_close < prev_low if 'prev_low' in locals() else curr_close < prev_open)
+
+            if is_bearish_engulfing or is_strong_bearish:
+                return "buy"   # <--- ULTA: Bearish pattern triggers BUY
 
     return "none"
 
 # ------------------------------------------------------------
-# EXECUTION LOGIC
+# EXECUTION ENGINE
 # ------------------------------------------------------------
 def get_position():
     if not product_id:
@@ -216,16 +273,16 @@ def place_market_order(side):
         "size": LOT_SIZE, 
         "side": side, 
         "order_type": "market_order", 
-        "client_order_id": "GH_PURE_" + str(int(time.time()))
+        "client_order_id": "GH_FAST_" + str(int(time.time()))
     }
     return private_request("POST", "/v2/orders", body=body)
 
 def wait_for_fill():
-    for _ in range(20):
+    for _ in range(15):
         pos = get_position()
         if pos and abs(pos["size"]) > 0 and pos["entry_price"] > 0:
             return pos
-        time.sleep(0.3)
+        time.sleep(0.2)
     return None
 
 def round_price(price):
@@ -341,7 +398,7 @@ def execute_trade(side, price):
             tp_val = round_price(entry * (1 - TP_PCT))
 
         success_msg = (
-            f"⚡ PURE CANDLE INVERSE TRADE EXECUTED!\n"
+            f"⚡ ULTRAFAST CANDLE INVERSE TRADE EXECUTED!\n"
             f"Side: {side.upper()} | Lots: {LOT_SIZE}\n"
             f"Entry: {entry:.8f}\n"
             f"SL (0.5%): {sl_val:.8f}\n"
@@ -386,10 +443,10 @@ def telegram_command_listener():
                             
                         if text == "/stop":
                             bot_active = False
-                            send_telegram("🔴 PURE CANDLE INVERSE ENGINE PAUSED!")
+                            send_telegram("🔴 ULTRAFAST ENGINE PAUSED!")
                         elif text == "/start":
                             bot_active = True
-                            send_telegram("🟢 PURE CANDLE INVERSE ENGINE RESUMED!")
+                            send_telegram("🟢 ULTRAFAST ENGINE RESUMED!")
                         elif text == "/reset":
                             with order_lock:
                                 order_in_progress = False
@@ -405,7 +462,7 @@ def telegram_command_listener():
                             
                             report = (
                                 f"🤖 BOT STATUS: {st}\n"
-                                f"📍 Mode: Pure Candlestick Inverse (No Filter)\n"
+                                f"📍 Mode: Ultrafast Price Candle Inverse (No Filter)\n"
                                 f"📍 Position: {pos_status}\n"
                                 f"-----------------------------\n"
                                 f"🏆 Wins: {w_cnt} | ❌ Losses: {l_cnt}\n"
@@ -425,7 +482,7 @@ threading.Thread(target=telegram_command_listener, daemon=True).start()
 # ------------------------------------------------------------
 # MAIN LOOP
 # ------------------------------------------------------------
-print("STARTING PURE CANDLESTICK INVERSE ENGINE...", flush=True)
+print("STARTING ULTRAFAST PRICE-CANDLE INVERSE ENGINE...", flush=True)
 if not load_product():
     raise SystemExit
 
@@ -433,15 +490,15 @@ while True:
     try:
         price = get_live_ticker_data()
         if price is None:
-            time.sleep(0.3)
+            time.sleep(0.2)
             continue
 
-        signal = get_pure_candlestick_signal(price)
+        signal = process_tick_and_detect_pattern(price)
         
         if bot_active:
             if signal in ("buy", "sell") and time.time() - last_trade_time > COOLDOWN_SECONDS:
                 execute_trade(signal, price)
-        time.sleep(0.3)
+        time.sleep(0.2)
     except KeyboardInterrupt:
         break
     except Exception as e:
