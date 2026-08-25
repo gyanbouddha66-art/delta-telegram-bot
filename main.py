@@ -125,13 +125,13 @@ def process_structure_pivots(c_data):
 def fetch_candles_and_detect():
     try:
         now = int(time.time())
-        # Exactly 30 candles of 1m resolution (1800 seconds)
+        # Fetch 30 Candles (1800 Secs) using official /v2/chart/history endpoint
         start_time = now - 1800 
         
-        url = f"{BASE_URL}/v2/ohlc"
+        url = f"{BASE_URL}/v2/chart/history"
         params = {
             "symbol": SYMBOL,
-            "resolution": "1m",
+            "resolution": "1",  # Delta Exchange official resolution "1" = 1 minute
             "start": str(start_time),
             "end": str(now)
         }
@@ -140,11 +140,13 @@ def fetch_candles_and_detect():
         
         if res.status_code == 200:
             data = res.json()
-            if isinstance(data, dict) and "result" in data and data["result"]:
-                # Sorting 30 candles chronologically
-                raw_candles = data["result"]
-                c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in raw_candles]
-                c_list = c_list[-30:] # Take last 30 candles for instant speed
+            if isinstance(data, dict) and "h" in data and "l" in data and "c" in data:
+                c_list = [{"high": float(h), "low": float(l), "close": float(c)} for h, l, c in zip(data["h"], data["l"], data["c"])]
+                c_list = c_list[-30:] # Last 30 candles
+                process_structure_pivots(c_list)
+            elif isinstance(data, dict) and "result" in data and data["result"]:
+                c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in data["result"]]
+                c_list = c_list[-30:]
                 process_structure_pivots(c_list)
         else:
             print(f"API HTTP Status Error: {res.status_code}", flush=True)
