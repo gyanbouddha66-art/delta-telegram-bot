@@ -111,7 +111,7 @@ def process_structure_pivots(c_data):
             execute_direction_trade("BUY")
         else:
             execute_direction_trade("SELL")
-        last_hh = ph  # Continuous state update
+        last_hh = ph
 
     # Check Swing Low (Pivot Low)
     if c2['low'] < c1['low'] and c2['low'] < c3['low']:
@@ -120,14 +120,13 @@ def process_structure_pivots(c_data):
             execute_direction_trade("SELL")
         else:
             execute_direction_trade("BUY")
-        last_ll = pl  # Continuous state update
+        last_ll = pl
 
 def fetch_candles_and_detect():
     try:
         now = int(time.time())
         start_time = now - 1800  # 30 candles (1800 sec)
         
-        # Delta Official REST Candles Endpoint
         url = f"{BASE_URL}/v2/history/candles"
         params = {
             "symbol": SYMBOL,
@@ -142,7 +141,13 @@ def fetch_candles_and_detect():
             data = res.json()
             raw_candles = data.get("result", [])
             if raw_candles:
-                c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in raw_candles]
+                c_list = []
+                for c in raw_candles:
+                    h = float(c["high"]) if c.get("high") is not None else 0.0
+                    l = float(c["low"]) if c.get("low") is not None else 0.0
+                    cl = float(c["close"]) if c.get("close") is not None else 0.0
+                    c_list.append({"high": h, "low": l, "close": cl})
+                
                 c_list = c_list[-30:]
                 process_structure_pivots(c_list)
         else:
