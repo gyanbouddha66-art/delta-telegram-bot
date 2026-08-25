@@ -5,7 +5,7 @@ BASE_URL = "https://api.india.delta.exchange"
 SYMBOL = "ARCUSD"
 LOT_SIZE = 3                      # Lot Size: 3 Lots
 
-# Environment Variables से लोड करें (Hardcode न करें)
+# Environment Variables से API Keys लें
 API_KEY = os.getenv("API_KEY", "")
 API_SECRET = os.getenv("API_SECRET", "")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -27,7 +27,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "⚡ Market Structure Speed Engine Bot Active!"
+    return "⚡ Market Structure Speed Engine Bot Active 24/7!"
 
 def send_telegram(msg):
     print(f"[TELEGRAM] {msg}", flush=True)
@@ -77,7 +77,6 @@ def execute_direction_trade(direction):
         size, _ = get_position()
         print(f"⚡ EXECUTION TRIGGERED: {direction} | Current Pos: {size}", flush=True)
         
-        # Target execution size calculate करें
         target_size = LOT_SIZE if direction == "BUY" else -LOT_SIZE
         order_size = abs(target_size - size)
 
@@ -100,45 +99,65 @@ def process_structure_pivots(c_data):
     global last_hh, last_ll
     if len(c_data) < 5: return
     
-    # Standard Pivot Low / Pivot High Logic (3 Candles Window)
-    c1 = c_data[-3] # Left candle
-    c2 = c_data[-2] # Pivot Candidate candle
-    c3 = c_data[-1] # Right candle
+    # Standard Pivot 3-Candle Logic
+    c1 = c_data[-3]
+    c2 = c_data[-2]
+    c3 = c_data[-1]
 
-    # Check Swing High (Pivot High)
+    # Check Swing High
     if c2['high'] > c1['high'] and c2['high'] > c3['high']:
         ph = c2['high']
         if last_hh is None or ph > last_hh:
             last_hh = ph
-            execute_direction_trade("BUY")  # Higher High -> Bullish
+            execute_direction_trade("BUY")
         else:
-            execute_direction_trade("SELL") # Lower High -> Bearish
+            execute_direction_trade("SELL")
 
-    # Check Swing Low (Pivot Low)
+    # Check Swing Low
     if c2['low'] < c1['low'] and c2['low'] < c3['low']:
         pl = c2['low']
         if last_ll is None or pl < last_ll:
             last_ll = pl
-            execute_direction_trade("SELL") # Lower Low -> Bearish
+            execute_direction_trade("SELL")
         else:
-            execute_direction_trade("BUY")  # Higher Low -> Bullish
+            execute_direction_trade("BUY")
 
 def fetch_candles_and_detect():
     try:
         end = int(time.time())
-        res = session.get(BASE_URL + "/v2/ohlc", params={"symbol": SYMBOL, "resolution": "1m", "start": str(end - 900), "end": str(end)}, timeout=2.0).json()
-        if res and res.get("result"):
-            c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in res["result"]]
-            process_structure_pivots(c_list)
+        url = f"{BASE_URL}/v2/ohlc"
+        params = {
+            "symbol": SYMBOL,
+            "resolution": "1m",
+            "start": str(end - 900),
+            "end": str(end)
+        }
+        
+        # User-Agent header added to prevent Render Server blocks
+        headers = {"User-Agent": "Mozilla/5.0"}
+        res = session.get(url, params=params, headers=headers, timeout=5.0)
+        
+        # Status Code Check before parsing JSON
+        if res.status_code == 200:
+            data = res.json()
+            if data and data.get("result"):
+                c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in data["result"]]
+                process_structure_pivots(c_list)
+        else:
+            print(f"API HTTP Status Error: {res.status_code}", flush=True)
+
     except Exception as e:
         print(f"Fetch Error: {e}", flush=True)
 
 def start_engine():
     global product_id
-    res = session.get(BASE_URL + "/v2/products/" + SYMBOL).json()
-    if res and res.get("result"):
-        product_id = int(res["result"]["id"])
-        send_telegram(f"⚡ MARKET STRUCTURE ENGINE ACTIVE (LOT SIZE: {LOT_SIZE})!")
+    try:
+        res = session.get(BASE_URL + "/v2/products/" + SYMBOL, headers={"User-Agent": "Mozilla/5.0"}, timeout=5.0).json()
+        if res and res.get("result"):
+            product_id = int(res["result"]["id"])
+            send_telegram(f"⚡ MARKET STRUCTURE ENGINE ACTIVE (LOT SIZE: {LOT_SIZE})!")
+    except Exception as e:
+        print(f"Product Fetch Error: {e}", flush=True)
 
     while True:
         if bot_active:
