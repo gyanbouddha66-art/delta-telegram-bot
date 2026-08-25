@@ -2,136 +2,182 @@ import os
 import time
 import hmac
 import hashlib
+import json
+import threading
 import requests
-from flask import Flask, request, jsonify
+import pandas as pd
+import numpy as np
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-app = Flask(__name__)
+# --- Environment Variables ---
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")
+DELTA_API_KEY = os.getenv("DELTA_API_KEY", "YOUR_API_KEY")
+DELTA_API_SECRET = os.getenv("DELTA_API_SECRET", "YOUR_API_SECRET")
 
-# Delta API Credentials
-DELTA_API_KEY      = "UvOmLQABY3ppqe83KcPCWvfTxLkD8c"
-DELTA_API_SECRET   = "05YCaLlNEM1C7qTxBGLYSICFsiP0viEv6g3zQILtLYguaPIgYF4DSJSJBpFP"
+SYMBOL = "BTCUSD"
+TIMEFRAME = "1m"
+LOT_SIZE = 5
 
-WEBHOOK_PASSPHRASE = os.environ.get("WEBHOOK_PASSPHRASE", "MY_SUPER_SECRET_123")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID")
+is_bot_active = True
+product_id_cache = None
 
-# POSITION & TRAILING CONFIGURATION
-FIXED_LOT_SIZE = 20    # 20 Lots
-LEVERAGE       = 5     # 5x Leverage
-SL_AMOUNT      = 7.5   # 25% Stop Loss (Initial)
-TRAIL_VALUE    = 7.5   # Trailing SL Steps (7.5 पॉइंट्स पर खिसकेगा)
-TP_AMOUNT      = 15.0  # 50% Take Profit
-
-def generate_signature(method, endpoint, payload_str, timestamp):
-    """Delta Exchange Signature Generator"""
-    signature_data = method + timestamp + endpoint + payload_str
+# --- Delta API Signature Generator ---
+def generate_signature(method, path, payload, timestamp):
+    signature_data = method + timestamp + path + payload
     return hmac.new(
         DELTA_API_SECRET.encode('utf-8'),
         signature_data.encode('utf-8'),
         hashlib.sha256
     ).hexdigest()
 
+def get_product_id(symbol):
+    global product_id_cache
+    if product_id_cache:
+        return product_id_cache
+    try:
+        res = requests.get("https://api.delta.exchange/v2/products").json()
+        if 'result' in res:
+            for p in res['result']:
+                if p['symbol'] == symbol:
+                    product_id_cache = p['id']
+                    return product_id_cache
+    except Exception as e:
+        print("Product ID Fetch Error:", e)
+    return None
+
 def send_telegram_msg(message):
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
-            requests.post(url, json=payload, timeout=5)
+            requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"})
         except Exception as e:
-            print("Telegram Error:", str(e))
+            print("Telegram Alert Error:", e)
 
-def set_leverage(symbol, leverage_value):
-    """5x Leverage Setup"""
-    endpoint = "/v2/products/leverage"
-    url = "https://api.delta.exchange" + endpoint
+# --- Delta Order Execution Engine ---
+def place_delta_order(side, size, sl_price, tp_price):
+    prod_id = get_product_id(SYMBOL)
+    if not prod_id:
+        print("Product ID not found!")
+        return
+
+    path = "/v2/orders"
+    url = f"https://api.delta.exchange{path}"
     timestamp = str(int(time.time()))
     
-    payload = {
-        "product_symbol": symbol,
-        "leverage": str(leverage_value)
+    payload_dict = {
+        "product_id": prod_id,
+        "size": size,
+        "side": side,  # "buy" or "sell"
+        "order_type": "market_order",
+        "stop_loss_price": str(round(sl_price, 1)),
+        "take_profit_price": str(round(tp_price, 1))
     }
     
-    import json
-    payload_str = json.dumps(payload)
-    signature = generate_signature("POST", endpoint, payload_str, timestamp)
-    
+    payload_str = json.dumps(payload_dict)
+    signature = generate_signature("POST", path, payload_str, timestamp)
+
     headers = {
         "api-key": DELTA_API_KEY,
         "timestamp": timestamp,
         "signature": signature,
         "Content-Type": "application/json"
     }
-    requests.post(url, data=payload_str, headers=headers)
-
-@app.route('/', methods=['GET'])
-def home():
-    return "Render Delta Engine Active | 5x Leverage + Trailing SL Enabled", 200
-
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    data = request.json
-    if not data:
-        return jsonify({"status": "error", "message": "No Payload"}), 400
-
-    if data.get('secret') != WEBHOOK_PASSPHRASE:
-        return jsonify({"status": "unauthorized"}), 401
-
-    symbol = data.get('symbol', 'BTCUSD')
-    action = data.get('action') # 'buy' or 'sell'
-    size   = int(data.get('size', FIXED_LOT_SIZE))
 
     try:
-        # 1. Set 5x Leverage
-        set_leverage(symbol, LEVERAGE)
-
-        # 2. Bracket Order with Trailing SL
-        endpoint = "/v2/orders"
-        url = "https://api.delta.exchange" + endpoint
-        timestamp = str(int(time.time()))
-
-        payload = {
-            "product_symbol": symbol,
-            "size": size,
-            "side": action,
-            "order_type": "market_order",
-            "bracket_stop_loss_limit_price": str(SL_AMOUNT),
-            "bracket_stop_loss_trail_value": str(TRAIL_VALUE), # Trailing SL Activated
-            "bracket_take_profit_limit_price": str(TP_AMOUNT)
-        }
-
-        import json
-        payload_str = json.dumps(payload)
-        signature = generate_signature("POST", endpoint, payload_str, timestamp)
-
-        headers = {
-            "api-key": DELTA_API_KEY,
-            "timestamp": timestamp,
-            "signature": signature,
-            "Content-Type": "application/json"
-        }
-
-        res = requests.post(url, data=payload_str, headers=headers)
-        order_res = res.json()
-
-        if res.status_code in [200, 201]:
-            tg_text = (
-                f"🔥 <b>DELTA TRAILING ORDER EXECUTED</b>\n\n"
-                f"<b>Action:</b> {action.upper()}\n"
-                f"<b>Symbol:</b> {symbol}\n"
-                f"<b>Size:</b> {size} Lots (5x)\n"
-                f"<b>Trailing SL:</b> Enabled (₹7.5)\n"
-                f"<b>Target TP:</b> ₹15.0 ✅"
-            )
-            send_telegram_msg(tg_text)
-            return jsonify({"status": "success", "order": order_res}), 200
+        response = requests.post(url, data=payload_str, headers=headers)
+        res_data = response.json()
+        if response.status_code == 200 and res_data.get('success'):
+            msg = f"🚀 *TRADE EXECUTED!*\n\n*Side:* {side.upper()}\n*Lots:* {size}\n*SL:* {sl_price:.1f}\n*TP:* {tp_price:.1f}"
+            send_telegram_msg(msg)
+            print("Order Success:", res_data)
         else:
-            raise Exception(str(order_res))
-
+            print("Order Failed:", res_data)
     except Exception as e:
-        error_msg = f"🔴 <b>ORDER FAILED</b>\n\n<b>Error:</b> {str(e)}"
-        send_telegram_msg(error_msg)
-        return jsonify({"status": "error", "message": str(e)}), 500
+        print("Execution Exception:", e)
 
+# --- Telegram Handlers ---
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global is_bot_active
+    is_bot_active = True
+    await update.message.reply_text("✅ *Trading Bot Started!* 24/7 ऑटो-ट्रेडिंग चालू है।", parse_mode="Markdown")
+
+async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global is_bot_active
+    is_bot_active = False
+    await update.message.reply_text("🛑 *Trading Bot Stopped!* ऑटो-ट्रेडिंग रोक दी गई है।", parse_mode="Markdown")
+
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status = "RUNNING 🟢" if is_bot_active else "STOPPED 🔴"
+    await update.message.reply_text(f"📊 *Bot Status:* {status}", parse_mode="Markdown")
+
+# --- Fast Strategy Loop ---
+def fetch_candles(symbol, resolution, limit=250):
+    url = f"https://api.delta.exchange/v2/history/candles?resolution={resolution}&symbol={symbol}&limit={limit}"
+    try:
+        res = requests.get(url).json()
+        if 'result' in res:
+            df = pd.DataFrame(res['result']).iloc[::-1].reset_index(drop=True)
+            for col in ['close', 'high', 'low', 'open']:
+                df[col] = df[col].astype(float)
+            return df
+    except Exception as e:
+        print("API Fetch Error:", e)
+    return None
+
+def trading_loop():
+    global is_bot_active
+    last_trade_time = 0
+    
+    while True:
+        if is_bot_active:
+            try:
+                df = fetch_candles(SYMBOL, TIMEFRAME)
+                if df is not None and len(df) >= 200:
+                    df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
+                    
+                    high_low = df['high'] - df['low']
+                    high_close = np.abs(df['high'] - df['close'].shift())
+                    low_close = np.abs(df['low'] - df['close'].shift())
+                    df['tr'] = np.maximum(high_low, np.maximum(high_close, low_close))
+                    df['atr'] = df['tr'].rolling(14).mean()
+
+                    df['swing_high'] = df['high'].shift(1).rolling(5).max()
+                    df['swing_low'] = df['low'].shift(1).rolling(5).min()
+
+                    curr = df.iloc[-1]
+                    
+                    bullish_sweep = (curr['low'] < curr['swing_low']) and (curr['close'] > curr['swing_low']) and (curr['close'] > curr['ema200'])
+                    bearish_sweep = (curr['high'] > curr['swing_high']) and (curr['close'] < curr['swing_high']) and (curr['close'] < curr['ema200'])
+
+                    # 1 मिनट के भीतर डुप्लीकेट ऑर्डर से बचने के लिए टाइमर फ़िल्टर
+                    if time.time() - last_trade_time > 60:
+                        if bullish_sweep:
+                            sl = curr['low'] - (curr['atr'] * 1.5)
+                            tp = curr['close'] + (curr['atr'] * 1.0)
+                            place_delta_order("buy", LOT_SIZE, sl, tp)
+                            last_trade_time = time.time()
+
+                        elif bearish_sweep:
+                            sl = curr['high'] + (curr['atr'] * 1.5)
+                            tp = curr['close'] - (curr['atr'] * 1.0)
+                            place_delta_order("sell", LOT_SIZE, sl, tp)
+                            last_trade_time = time.time()
+
+            except Exception as e:
+                print("Strategy Loop Error:", e)
+        time.sleep(10)
+
+# --- Main Entry ---
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    t = threading.Thread(target=trading_loop, daemon=True)
+    t.start()
+
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("stop", stop_command))
+    app.add_handler(CommandHandler("status", status_command))
+    
+    print("Bot Controller Ready...")
+    app.run_polling()
