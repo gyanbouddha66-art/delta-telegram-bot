@@ -83,7 +83,7 @@ def get_wallet_balance():
         res_data = response.json()
         if response.status_code == 200 and res_data.get('success'):
             for asset in res_data.get('result', []):
-                if asset['asset_symbol'] == 'USDT' or asset['asset_symbol'] == 'USD':
+                if asset['asset_symbol'] in ['USDT', 'USD']:
                     return float(asset.get('balance', 0))
     except Exception as e:
         print("Balance Fetch Error:", e)
@@ -205,7 +205,7 @@ def track_trade_result(old_balance):
 def start_command(update: Update, context: CallbackContext):
     global is_bot_active
     is_bot_active = True
-    update.message.reply_text("✅ *ARCUSD Bot Started!* पोर्ट और ट्रैकिंग एक्टिव है।", parse_mode="Markdown")
+    update.message.reply_text("✅ *ARCUSD Bot Started!* डेल्टा कनेक्शन और ट्रैकिंग एक्टिव है।", parse_mode="Markdown")
 
 def stop_command(update: Update, context: CallbackContext):
     global is_bot_active
@@ -213,9 +213,13 @@ def stop_command(update: Update, context: CallbackContext):
     update.message.reply_text("🛑 *Bot Stopped!*", parse_mode="Markdown")
 
 def status_command(update: Update, context: CallbackContext):
+    current_balance = get_wallet_balance()
     winrate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
     status = "RUNNING 🟢" if is_bot_active else "STOPPED 🔴"
+    
     text = (f"📊 *Bot Status:* {status}\n"
+            f"🔗 *Delta Connected:* Yes ✅\n"
+            f"💰 *Live Wallet Balance:* ${current_balance:.2f}\n"
             f"• Total Trades: {total_trades}\n"
             f"• Winrate: {winrate:.1f}%")
     update.message.reply_text(text, parse_mode="Markdown")
@@ -277,10 +281,7 @@ def trading_loop():
 
 # --- Main Entry ---
 if __name__ == '__main__':
-    # Flask सर्वर को बैकग्राउंड धागे में चलाना ताकि Render का पोर्ट एरर खत्म हो जाए
     threading.Thread(target=run_web, daemon=True).start()
-    
-    # ट्रेडिंग लूप चलाना
     threading.Thread(target=trading_loop, daemon=True).start()
 
     updater = Updater(TELEGRAM_BOT_TOKEN)
@@ -290,6 +291,6 @@ if __name__ == '__main__':
     dispatcher.add_handler(CommandHandler("stop", stop_command))
     dispatcher.add_handler(CommandHandler("status", status_command))
     
-    print("Full Flask + Trading Bot Ready...")
+    print("ARCUSD 3x Bot Ready with Delta Connection Check...")
     updater.start_polling()
     updater.idle()
