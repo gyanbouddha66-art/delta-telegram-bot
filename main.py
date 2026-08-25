@@ -16,12 +16,19 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")
 DELTA_API_KEY = os.getenv("DELTA_API_KEY", "YOUR_API_KEY")
 DELTA_API_SECRET = os.getenv("DELTA_API_SECRET", "YOUR_API_SECRET")
 
-SYMBOL = "BTCUSD"
+# --- Trading Configuration for ARCUSD (3x Leverage, 3 Lots) ---
+SYMBOL = "ARCUSD"
 TIMEFRAME = "1m"
-LOT_SIZE = 5
+LOT_SIZE = 3         # Total 30 ARC
+LEVERAGE = 3         # 3x Leverage
 
 is_bot_active = True
 product_id_cache = None
+
+# --- Performance Tracking Variables ---
+total_trades = 0
+winning_trades = 0
+losing_trades = 0
 
 # --- Delta API Signature Generator ---
 def generate_signature(method, path, payload, timestamp):
@@ -47,6 +54,30 @@ def get_product_id(symbol):
         print("Product ID Fetch Error:", e)
     return None
 
+def get_wallet_balance():
+    """ डेल्टा अकाउंट से लाइव वॉलेट बैलेंस फेच करने के लिए """
+    path = "/v2/wallet/balances"
+    url = f"https://api.delta.exchange{path}"
+    timestamp = str(int(time.time()))
+    signature = generate_signature("GET", path, "", timestamp)
+
+    headers = {
+        "api-key": DELTA_API_KEY,
+        "timestamp": timestamp,
+        "signature": signature
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        res_data = response.json()
+        if response.status_code == 200 and res_data.get('success'):
+            for asset in res_data.get('result', []):
+                if asset['asset_symbol'] == 'USDT' or asset['asset_symbol'] == 'USD':
+                    return float(asset.get('balance', 0))
+    except Exception as e:
+        print("Balance Fetch Error:", e)
+    return 0.0
+
 def send_telegram_msg(message):
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
@@ -55,12 +86,45 @@ def send_telegram_msg(message):
         except Exception as e:
             print("Telegram Alert Error:", e)
 
-# --- Delta Order Execution Engine ---
+# --- Set Leverage Function ---
+def set_leverage(prod_id, leverage):
+    path = "/v2/orders/leverage"
+    url = f"https://api.delta.exchange{path}"
+    timestamp = str(int(time.time()))
+    
+    payload_dict = {
+        "product_id": prod_id,
+        "leverage": leverage
+    }
+    
+    payload_str = json.dumps(payload_dict)
+    signature = generate_signature("POST", path, payload_str, timestamp)
+
+    headers = {
+        "api-key": DELTA_API_KEY,
+        "timestamp": timestamp,
+        "signature": signature,
+        "Content-Type": "application/json"
+    }
+
+    try:
+        requests.post(url, data=payload_str, headers=headers)
+    except Exception as e:
+        print("Set Leverage Exception:", e)
+
+# --- Delta Order Execution Engine with Balance & Winrate Tracker ---
 def place_delta_order(side, size, sl_price, tp_price):
+    global total_trades, winning_trades, losing_trades
+    
+    # ट्रेड लेने से पहले पुराना बैलेंस नोट करें
+    old_balance = get_wallet_balance()
+
     prod_id = get_product_id(SYMBOL)
     if not prod_id:
         print("Product ID not found!")
         return
+
+    set_leverage(prod_id, LEVERAGE)
 
     path = "/v2/orders"
     url = f"https://api.delta.exchange{path}"
@@ -71,8 +135,8 @@ def place_delta_order(side, size, sl_price, tp_price):
         "size": size,
         "side": side,
         "order_type": "market_order",
-        "stop_loss_price": str(round(sl_price, 1)),
-        "take_profit_price": str(round(tp_price, 1))
+        "stop_loss_price": str(round(sl_price, 4)),
+        "take_profit_price": str(round(tp_price, 4))
     }
     
     payload_str = json.dumps(payload_dict)
@@ -89,28 +153,67 @@ def place_delta_order(side, size, sl_price, tp_price):
         response = requests.post(url, data=payload_str, headers=headers)
         res_data = response.json()
         if response.status_code == 200 and res_data.get('success'):
-            msg = f"🚀 *TRADE EXECUTED!*\n\n*Side:* {side.upper()}\n*Lots:* {size}\n*SL:* {sl_price:.1f}\n*TP:* {tp_price:.1f}"
+            total_trades += 1
+            msg = (f"🚀 *ARCUSD TRADE EXECUTED (3x | 3 Lots)*\n\n"
+                   f"*Side:* {side.upper()}\n"
+                   f"*Old Balance:* ${old_balance:.2f}\n"
+                   f"*SL:* {sl_price:.4f} | *TP:* {tp_price:.4f}\n\n"
+                   f"⏳ *Target / Stoploss का इंतज़ार है...*")
             send_telegram_msg(msg)
-            print("Order Success:", res_data)
+            
+            # बैकग्राउंड में ट्रेड क्लोज होने और नए बैलेंस/विनरेट को ट्रैक करने का थ्रेड
+            threading.Thread(target=track_trade_result, args=(old_balance,)).start()
         else:
             print("Order Failed:", res_data)
     except Exception as e:
         print("Execution Exception:", e)
 
+def track_trade_result(old_balance):
+    global total_trades, winning_trades, losing_trades
+    # ट्रेड पूरी होने (TP या SL हिट होने) का अनुमानित इंतज़ार लूप
+    for _ in range(120): # 20 मिनट तक चेक करेगा
+        time.sleep(10)
+        new_balance = get_wallet_balance()
+        if new_balance != old_balance and new_balance > 0:
+            diff = new_balance - old_balance
+            if diff > 0:
+                winning_trades += 1
+                status_text = "🟢 *TP HIT (PROFIT)* 🎉"
+            else:
+                losing_trades += 1
+                status_text = "🔴 *SL HIT (LOSS)* ⚠️"
+            
+            winrate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+            
+            result_msg = (f"{status_text}\n\n"
+                          f"*Old Balance:* ${old_balance:.2f}\n"
+                          f"*New Balance:* ${new_balance:.2f}\n"
+                          f"*P&L:* ${diff:+.2f}\n\n"
+                          f"📊 *Winrate Stats:*\n"
+                          f"• Total Trades: {total_trades}\n"
+                          f"• Wins: {winning_trades} | Losses: {losing_trades}\n"
+                          f"• Winrate: {winrate:.1f}%")
+            send_telegram_msg(result_msg)
+            break
+
 # --- Telegram Handlers (v13.15 Compatible) ---
 def start_command(update: Update, context: CallbackContext):
     global is_bot_active
     is_bot_active = True
-    update.message.reply_text("✅ *Trading Bot Started!* 24/7 ऑटो-ट्रेडिंग चालू है।", parse_mode="Markdown")
+    update.message.reply_text("✅ *ARCUSD Tracker Bot Started!* बैलेंस और विनरेट ट्रैकिंग चालू है।", parse_mode="Markdown")
 
 def stop_command(update: Update, context: CallbackContext):
     global is_bot_active
     is_bot_active = False
-    update.message.reply_text("🛑 *Trading Bot Stopped!* ऑटो-ट्रेडिंग रोक दी गई है।", parse_mode="Markdown")
+    update.message.reply_text("🛑 *Bot Stopped!*", parse_mode="Markdown")
 
 def status_command(update: Update, context: CallbackContext):
+    winrate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
     status = "RUNNING 🟢" if is_bot_active else "STOPPED 🔴"
-    update.message.reply_text(f"📊 *Bot Status:* {status}", parse_mode="Markdown")
+    text = (f"📊 *Bot Status:* {status}\n"
+            f"• Total Trades: {total_trades}\n"
+            f"• Winrate: {winrate:.1f}%")
+    update.message.reply_text(text, parse_mode="Markdown")
 
 # --- Fast Strategy Loop ---
 def fetch_candles(symbol, resolution, limit=250):
@@ -180,6 +283,6 @@ if __name__ == '__main__':
     dispatcher.add_handler(CommandHandler("stop", stop_command))
     dispatcher.add_handler(CommandHandler("status", status_command))
     
-    print("Bot Controller Ready (v13.15)...")
+    print("Balance & Winrate Tracker Bot Ready...")
     updater.start_polling()
     updater.idle()
