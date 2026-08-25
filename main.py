@@ -1,11 +1,11 @@
 import os, requests, json, time, hmac, hashlib, threading
 from flask import Flask
 
+# Delta Exchange India Base URL Fix
 BASE_URL = "https://api.india.delta.exchange"
 SYMBOL = "ARCUSD"
 LOT_SIZE = 3                      # Lot Size: 3 Lots
 
-# Environment Variables से API Keys लें
 API_KEY = os.getenv("API_KEY", "")
 API_SECRET = os.getenv("API_SECRET", "")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -51,7 +51,8 @@ def private_request(method, endpoint, params=None, body=None):
             "api-key": API_KEY, 
             "signature": sig, 
             "timestamp": timestamp, 
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0"
         }
         url = BASE_URL + endpoint
         res = session.request(method, url, params=params, data=payload, headers=headers, timeout=2.5)
@@ -99,7 +100,6 @@ def process_structure_pivots(c_data):
     global last_hh, last_ll
     if len(c_data) < 5: return
     
-    # Standard Pivot 3-Candle Logic
     c1 = c_data[-3]
     c2 = c_data[-2]
     c3 = c_data[-1]
@@ -125,26 +125,37 @@ def process_structure_pivots(c_data):
 def fetch_candles_and_detect():
     try:
         end = int(time.time())
-        url = f"{BASE_URL}/v2/ohlc"
+        # OHLC URL path fix (v2/chart/history)
+        url = f"{BASE_URL}/v2/chart/history"
         params = {
             "symbol": SYMBOL,
-            "resolution": "1m",
+            "resolution": "1",
             "start": str(end - 900),
             "end": str(end)
         }
         
-        # User-Agent header added to prevent Render Server blocks
         headers = {"User-Agent": "Mozilla/5.0"}
         res = session.get(url, params=params, headers=headers, timeout=5.0)
         
-        # Status Code Check before parsing JSON
         if res.status_code == 200:
             data = res.json()
             if data and data.get("result"):
                 c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in data["result"]]
                 process_structure_pivots(c_list)
+            elif data and data.get("c"): # Alternative Candle JSON Format
+                c_list = [{"high": float(h), "low": float(l), "close": float(c)} for h, l, c in zip(data["h"], data["l"], data["c"])]
+                process_structure_pivots(c_list)
         else:
-            print(f"API HTTP Status Error: {res.status_code}", flush=True)
+            # Alternate Endpoint Fallback
+            alt_url = f"{BASE_URL}/v2/ohlc"
+            alt_res = session.get(alt_url, params={"symbol": SYMBOL, "resolution": "1m", "start": str(end - 900), "end": str(end)}, headers=headers, timeout=5.0)
+            if alt_res.status_code == 200:
+                data = alt_res.json()
+                if data and data.get("result"):
+                    c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in data["result"]]
+                    process_structure_pivots(c_list)
+            else:
+                print(f"API HTTP Status Error: {res.status_code}", flush=True)
 
     except Exception as e:
         print(f"Fetch Error: {e}", flush=True)
@@ -152,7 +163,7 @@ def fetch_candles_and_detect():
 def start_engine():
     global product_id
     try:
-        res = session.get(BASE_URL + "/v2/products/" + SYMBOL, headers={"User-Agent": "Mozilla/5.0"}, timeout=5.0).json()
+        res = session.get(f"{BASE_URL}/v2/products/{SYMBOL}", headers={"User-Agent": "Mozilla/5.0"}, timeout=5.0).json()
         if res and res.get("result"):
             product_id = int(res["result"]["id"])
             send_telegram(f"⚡ MARKET STRUCTURE ENGINE ACTIVE (LOT SIZE: {LOT_SIZE})!")
