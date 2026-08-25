@@ -1,10 +1,9 @@
 import os, requests, json, time, hmac, hashlib, threading
 from flask import Flask
 
-# Delta Exchange India Base URL Fix
 BASE_URL = "https://api.india.delta.exchange"
 SYMBOL = "ARCUSD"
-LOT_SIZE = 3                      # Lot Size: 3 Lots
+LOT_SIZE = 3
 
 API_KEY = os.getenv("API_KEY", "")
 API_SECRET = os.getenv("API_SECRET", "")
@@ -98,13 +97,14 @@ def execute_direction_trade(direction):
 
 def process_structure_pivots(c_data):
     global last_hh, last_ll
-    if len(c_data) < 5: return
+    if len(c_data) < 3: return
     
+    # Pivot 1 Logic (Left 1, Candidate, Right 1)
     c1 = c_data[-3]
     c2 = c_data[-2]
     c3 = c_data[-1]
 
-    # Check Swing High
+    # Check Swing High (Pivot 1)
     if c2['high'] > c1['high'] and c2['high'] > c3['high']:
         ph = c2['high']
         if last_hh is None or ph > last_hh:
@@ -113,7 +113,7 @@ def process_structure_pivots(c_data):
         else:
             execute_direction_trade("SELL")
 
-    # Check Swing Low
+    # Check Swing Low (Pivot 1)
     if c2['low'] < c1['low'] and c2['low'] < c3['low']:
         pl = c2['low']
         if last_ll is None or pl < last_ll:
@@ -124,38 +124,30 @@ def process_structure_pivots(c_data):
 
 def fetch_candles_and_detect():
     try:
-        end = int(time.time())
-        # OHLC URL path fix (v2/chart/history)
-        url = f"{BASE_URL}/v2/chart/history"
+        now = int(time.time())
+        # Exactly 30 candles of 1m resolution (1800 seconds)
+        start_time = now - 1800 
+        
+        url = f"{BASE_URL}/v2/ohlc"
         params = {
             "symbol": SYMBOL,
-            "resolution": "1",
-            "start": str(end - 900),
-            "end": str(end)
+            "resolution": "1m",
+            "start": str(start_time),
+            "end": str(now)
         }
-        
         headers = {"User-Agent": "Mozilla/5.0"}
-        res = session.get(url, params=params, headers=headers, timeout=5.0)
+        res = session.get(url, params=params, headers=headers, timeout=4.0)
         
         if res.status_code == 200:
             data = res.json()
-            if data and data.get("result"):
-                c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in data["result"]]
-                process_structure_pivots(c_list)
-            elif data and data.get("c"): # Alternative Candle JSON Format
-                c_list = [{"high": float(h), "low": float(l), "close": float(c)} for h, l, c in zip(data["h"], data["l"], data["c"])]
+            if isinstance(data, dict) and "result" in data and data["result"]:
+                # Sorting 30 candles chronologically
+                raw_candles = data["result"]
+                c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in raw_candles]
+                c_list = c_list[-30:] # Take last 30 candles for instant speed
                 process_structure_pivots(c_list)
         else:
-            # Alternate Endpoint Fallback
-            alt_url = f"{BASE_URL}/v2/ohlc"
-            alt_res = session.get(alt_url, params={"symbol": SYMBOL, "resolution": "1m", "start": str(end - 900), "end": str(end)}, headers=headers, timeout=5.0)
-            if alt_res.status_code == 200:
-                data = alt_res.json()
-                if data and data.get("result"):
-                    c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in data["result"]]
-                    process_structure_pivots(c_list)
-            else:
-                print(f"API HTTP Status Error: {res.status_code}", flush=True)
+            print(f"API HTTP Status Error: {res.status_code}", flush=True)
 
     except Exception as e:
         print(f"Fetch Error: {e}", flush=True)
@@ -166,14 +158,14 @@ def start_engine():
         res = session.get(f"{BASE_URL}/v2/products/{SYMBOL}", headers={"User-Agent": "Mozilla/5.0"}, timeout=5.0).json()
         if res and res.get("result"):
             product_id = int(res["result"]["id"])
-            send_telegram(f"⚡ MARKET STRUCTURE ENGINE ACTIVE (LOT SIZE: {LOT_SIZE})!")
+            send_telegram(f"⚡ MARKET STRUCTURE ENGINE ACTIVE (30 CANDLES / LOT: {LOT_SIZE})!")
     except Exception as e:
         print(f"Product Fetch Error: {e}", flush=True)
 
     while True:
         if bot_active:
             fetch_candles_and_detect()
-        time.sleep(3)
+        time.sleep(2)
 
 threading.Thread(target=start_engine, daemon=True).start()
 
