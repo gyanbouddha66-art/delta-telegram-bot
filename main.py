@@ -8,7 +8,7 @@ import requests
 import pandas as pd
 import numpy as np
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import Updater, CommandHandler, CallbackContext
 
 # --- Environment Variables ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN")
@@ -69,7 +69,7 @@ def place_delta_order(side, size, sl_price, tp_price):
     payload_dict = {
         "product_id": prod_id,
         "size": size,
-        "side": side,  # "buy" or "sell"
+        "side": side,
         "order_type": "market_order",
         "stop_loss_price": str(round(sl_price, 1)),
         "take_profit_price": str(round(tp_price, 1))
@@ -97,20 +97,20 @@ def place_delta_order(side, size, sl_price, tp_price):
     except Exception as e:
         print("Execution Exception:", e)
 
-# --- Telegram Handlers ---
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- Telegram Handlers (v13.15 Compatible) ---
+def start_command(update: Update, context: CallbackContext):
     global is_bot_active
     is_bot_active = True
-    await update.message.reply_text("✅ *Trading Bot Started!* 24/7 ऑटो-ट्रेडिंग चालू है।", parse_mode="Markdown")
+    update.message.reply_text("✅ *Trading Bot Started!* 24/7 ऑटो-ट्रेडिंग चालू है।", parse_mode="Markdown")
 
-async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def stop_command(update: Update, context: CallbackContext):
     global is_bot_active
     is_bot_active = False
-    await update.message.reply_text("🛑 *Trading Bot Stopped!* ऑटो-ट्रेडिंग रोक दी गई है।", parse_mode="Markdown")
+    update.message.reply_text("🛑 *Trading Bot Stopped!* ऑटो-ट्रेडिंग रोक दी गई है।", parse_mode="Markdown")
 
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def status_command(update: Update, context: CallbackContext):
     status = "RUNNING 🟢" if is_bot_active else "STOPPED 🔴"
-    await update.message.reply_text(f"📊 *Bot Status:* {status}", parse_mode="Markdown")
+    update.message.reply_text(f"📊 *Bot Status:* {status}", parse_mode="Markdown")
 
 # --- Fast Strategy Loop ---
 def fetch_candles(symbol, resolution, limit=250):
@@ -151,7 +151,6 @@ def trading_loop():
                     bullish_sweep = (curr['low'] < curr['swing_low']) and (curr['close'] > curr['swing_low']) and (curr['close'] > curr['ema200'])
                     bearish_sweep = (curr['high'] > curr['swing_high']) and (curr['close'] < curr['swing_high']) and (curr['close'] < curr['ema200'])
 
-                    # 1 मिनट के भीतर डुप्लीकेट ऑर्डर से बचने के लिए टाइमर फ़िल्टर
                     if time.time() - last_trade_time > 60:
                         if bullish_sweep:
                             sl = curr['low'] - (curr['atr'] * 1.5)
@@ -174,10 +173,13 @@ if __name__ == '__main__':
     t = threading.Thread(target=trading_loop, daemon=True)
     t.start()
 
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("stop", stop_command))
-    app.add_handler(CommandHandler("status", status_command))
+    updater = Updater(TELEGRAM_BOT_TOKEN)
+    dispatcher = updater.dispatcher
     
-    print("Bot Controller Ready...")
-    app.run_polling()
+    dispatcher.add_handler(CommandHandler("start", start_command))
+    dispatcher.add_handler(CommandHandler("stop", stop_command))
+    dispatcher.add_handler(CommandHandler("status", status_command))
+    
+    print("Bot Controller Ready (v13.15)...")
+    updater.start_polling()
+    updater.idle()
