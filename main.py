@@ -1,6 +1,6 @@
 # ============================================================
-# RSI CROSSOVER ENGINE (RSI 5 vs RSI 14) - RENDER FREE FIX
-# DELTA EXCHANGE INDIA V2 | ARCUSD (1-MIN TIMEFRAME)
+# ULTRA-FAST SCALPER ENGINE (DELTA EXCHANGE INDIA V2)
+# SYMBOL: ARCUSD | LOTS: 3 | WIDER STOP-LOSS (SL)
 # ============================================================
 
 import os
@@ -14,21 +14,21 @@ from flask import Flask
 
 BASE_URL = "https://api.india.delta.exchange"
 SYMBOL = "ARCUSD"
-LOT_SIZE = 1                      # Lot Size
+LOT_SIZE = 3                      # Updated Lot Size: 3 Lots
 
-COOLDOWN_SECONDS = 3              # Trade Cooldown in seconds
-CANDLE_TIMEFRAME_SEC = 60         # 1-Minute Timeframe
+COOLDOWN_SECONDS = 1              # Fast Scalp Cooldown
+CANDLE_TIMEFRAME_SEC = 60         # Timeframe
 
-# RSI Parameters
-RSI_FAST_PERIOD = 5
-RSI_SLOW_PERIOD = 14
+# Fast Scalp RSI Parameters
+RSI_FAST_PERIOD = 3               
+RSI_SLOW_PERIOD = 8               
 
-# Risk Management
-ATR_PERIOD = 14
-ATR_MULTIPLIER_SL = 1.5           # Trailing Stop-Loss = 1.5 x ATR
-ATR_MULTIPLIER_TP = 3.0           # Target Profit = 3.0 x ATR
+# Risk Management Parameters (Wider SL & TP)
+ATR_PERIOD = 10
+ATR_MULTIPLIER_SL = 1.5           # Increased Stop-Loss (1.5 x ATR)
+ATR_MULTIPLIER_TP = 2.5           # Expanded Target Profit (2.5 x ATR)
 
-# Environment Variables
+# API Credentials
 API_KEY = os.getenv("API_KEY", "UvOmLQABY3ppqe83KcPCWvfTxLkD8c")
 API_SECRET = os.getenv("API_SECRET", "05YCaLlNEM1C7qTxBGLYSICFsiP0viEv6g3zQILtLYguaPIgYF4DSJSJBpFP")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -50,25 +50,23 @@ last_valid_balance = 0.0
 current_candle = None
 closed_candles = []
 
-latest_rsi5 = 50.0
-latest_rsi14 = 50.0
-prev_rsi5 = 50.0
-prev_rsi14 = 50.0
+latest_rsi_fast = 50.0
+latest_rsi_slow = 50.0
 latest_price = 0.0
 
 session = requests.Session()
-adapter = requests.adapters.HTTPAdapter(max_retries=2, pool_connections=20, pool_maxsize=20)
+adapter = requests.adapters.HTTPAdapter(max_retries=1, pool_connections=50, pool_maxsize=50)
 session.mount("https://", adapter)
-session.headers.update({"User-Agent": "RSICrossover-Engine/1.0", "Accept": "application/json"})
+session.headers.update({"User-Agent": "FastScalper-Engine/2.0", "Accept": "application/json"})
 
 # ------------------------------------------------------------
-# FLASK SERVER FOR RENDER PORT BINDING (UPTIME)
+# RENDER FREE TIER PORT BINDING (FLASK)
 # ------------------------------------------------------------
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "RSI 5/14 Crossover Engine Live 24/7!"
+    return "⚡ High-Speed Scalper Engine (Lot: 3 | Wider SL) Active 24/7!"
 
 # ------------------------------------------------------------
 # HELPER & API FUNCTIONS
@@ -78,14 +76,14 @@ def send_telegram(message):
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        session.post(url, json={"chat_id": CHAT_ID, "text": message}, timeout=3)
-    except Exception as e:
-        print(f"⚠️ Telegram Error: {e}", flush=True)
+        session.post(url, json={"chat_id": CHAT_ID, "text": message}, timeout=2)
+    except Exception:
+        pass
 
 def public_get(endpoint, params=None):
     try:
         url = BASE_URL + endpoint
-        res = session.get(url, params=params, timeout=2)
+        res = session.get(url, params=params, timeout=1.5)
         if res and res.status_code == 200:
             return res.json()
         return None
@@ -105,7 +103,6 @@ def private_request(method, endpoint, params=None, body=None):
             
         payload = json.dumps(body, separators=(",", ":")) if body is not None else ""
         timestamp = str(int(time.time()))
-        
         signature = make_signature(method, timestamp, endpoint, query, payload)
         
         headers = {
@@ -117,17 +114,17 @@ def private_request(method, endpoint, params=None, body=None):
         
         url = BASE_URL + endpoint
         if method == "GET":
-            res = session.get(url, params=params, headers=headers, timeout=2)
+            res = session.get(url, params=params, headers=headers, timeout=1.5)
         elif method == "POST":
-            res = session.post(url, data=payload, headers=headers, timeout=2)
+            res = session.post(url, data=payload, headers=headers, timeout=1.5)
         else:
-            res = session.request(method, url, params=params, data=payload, headers=headers, timeout=2)
+            res = session.request(method, url, params=params, data=payload, headers=headers, timeout=1.5)
             
         if res and res.status_code == 200:
             return res.json()
         return None
     except Exception as e:
-        print(f"❌ Private API Error: {e}", flush=True)
+        print(f"❌ API Error: {e}", flush=True)
         return None
 
 def get_wallet_balance():
@@ -145,18 +142,12 @@ def get_wallet_balance():
 def fetch_historical_candles():
     global closed_candles
     end_time = int(time.time())
-    start_time = end_time - (60 * 60)
-    params = {
-        "symbol": SYMBOL,
-        "resolution": "1m",
-        "start": str(start_time),
-        "end": str(end_time)
-    }
+    start_time = end_time - (30 * 60)
+    params = {"symbol": SYMBOL, "resolution": "1m", "start": str(start_time), "end": str(end_time)}
     data = public_get("/v2/ohlc", params=params)
     if data and data.get("result"):
-        raw_candles = data["result"]
         parsed = []
-        for c in raw_candles:
+        for c in data["result"]:
             parsed.append({
                 "open": float(c["open"]),
                 "high": float(c["high"]),
@@ -164,8 +155,8 @@ def fetch_historical_candles():
                 "close": float(c["close"]),
                 "start_time": float(c["time"])
             })
-        closed_candles = parsed[-50:]
-        print(f"✅ Pre-loaded {len(closed_candles)} historical 1-Min candles.", flush=True)
+        closed_candles = parsed[-30:]
+        print(f"⚡ Scalper Loaded {len(closed_candles)} Candles.", flush=True)
 
 def load_product():
     global product_id, tick_size, initial_wallet_balance
@@ -178,16 +169,12 @@ def load_product():
                 tick_size = float(result.get("tick_size", 0.00001))
                 initial_wallet_balance = get_wallet_balance()
                 fetch_historical_candles()
-                msg = (
-                    f"⚡ RSI 5/14 CROSSOVER BOT ONLINE!\n"
-                    f"Symbol: {SYMBOL} | Lots: {LOT_SIZE}\n"
-                    f"Balance: ${initial_wallet_balance:.2f}"
-                )
+                msg = f"🚀 HIGH-SPEED SCALPER ONLINE!\nSymbol: {SYMBOL}\nLot Size: {LOT_SIZE}\nBalance: ${initial_wallet_balance:.2f}"
                 print(msg, flush=True)
                 send_telegram(msg)
                 return True
             except Exception as e:
-                print(f"Product Init Error: {e}")
+                print(f"Init Error: {e}")
         time.sleep(1)
     return False
 
@@ -195,18 +182,15 @@ def get_live_ticker_data():
     data = public_get(f"/v2/tickers/{SYMBOL}")
     if data and isinstance(data, dict) and "result" in data:
         res = data["result"]
-        price = None
         for k in ("mark_price", "spot_price", "close"):
             if res.get(k) is not None:
-                price = float(res.get(k))
-                break
-        return price
+                return float(res.get(k))
     return None
 
 # ------------------------------------------------------------
-# INDICATORS & CROSSOVER LOGIC
+# FAST SCALPER INDICATORS & LOGIC
 # ------------------------------------------------------------
-def calculate_rsi(candles, period=14):
+def calculate_rsi(candles, period):
     if len(candles) < period + 1:
         return 50.0
     gains, losses = 0.0, 0.0
@@ -221,9 +205,9 @@ def calculate_rsi(candles, period=14):
     rs = (gains / period) / (losses / period)
     return 100.0 - (100.0 / (1.0 + rs))
 
-def calculate_atr(candles, period=14):
+def calculate_atr(candles, period=10):
     if len(candles) < period + 1:
-        return 0.0005
+        return 0.0004
     tr_list = []
     for i in range(1, len(candles)):
         h, l, pc = candles[i]["high"], candles[i]["low"], candles[i-1]["close"]
@@ -231,24 +215,23 @@ def calculate_atr(candles, period=14):
         tr_list.append(tr)
     return sum(tr_list[-period:]) / period
 
-def evaluate_rsi_crossover(candles):
-    global latest_rsi5, latest_rsi14, prev_rsi5, prev_rsi14
-    
-    if len(candles) < 20:
-        return "none", 0.0
+def evaluate_scalp_signal(candles):
+    global latest_rsi_fast, latest_rsi_slow
+    if len(candles) < 10:
+        return "none", 0.0004
 
-    latest_rsi5 = calculate_rsi(candles, RSI_FAST_PERIOD)
-    latest_rsi14 = calculate_rsi(candles, RSI_SLOW_PERIOD)
+    latest_rsi_fast = calculate_rsi(candles, RSI_FAST_PERIOD)
+    latest_rsi_slow = calculate_rsi(candles, RSI_SLOW_PERIOD)
     
     prev_candles = candles[:-1]
-    prev_rsi5 = calculate_rsi(prev_candles, RSI_FAST_PERIOD)
-    prev_rsi14 = calculate_rsi(prev_candles, RSI_SLOW_PERIOD)
+    prev_fast = calculate_rsi(prev_candles, RSI_FAST_PERIOD)
+    prev_slow = calculate_rsi(prev_candles, RSI_SLOW_PERIOD)
     
     atr = calculate_atr(candles, ATR_PERIOD)
 
-    if prev_rsi5 <= prev_rsi14 and latest_rsi5 > latest_rsi14:
+    if prev_fast <= prev_slow and latest_rsi_fast > latest_rsi_slow and latest_rsi_fast < 70:
         return "buy", atr
-    elif prev_rsi5 >= prev_rsi14 and latest_rsi5 < latest_rsi14:
+    elif prev_fast >= prev_slow and latest_rsi_fast < latest_rsi_slow and latest_rsi_fast > 30:
         return "sell", atr
 
     return "none", atr
@@ -260,7 +243,7 @@ def process_tick_and_detect_signal(price):
 
     if current_candle is None:
         current_candle = {"open": price, "high": price, "low": price, "close": price, "start_time": now}
-        return "none", 0.0
+        return "none", 0.0004
 
     current_candle["high"] = max(current_candle["high"], price)
     current_candle["low"] = min(current_candle["low"], price)
@@ -268,14 +251,14 @@ def process_tick_and_detect_signal(price):
 
     if now - current_candle["start_time"] >= CANDLE_TIMEFRAME_SEC:
         closed_candles.append(current_candle.copy())
-        if len(closed_candles) > 60:
+        if len(closed_candles) > 40:
             closed_candles.pop(0)
         current_candle = {"open": price, "high": price, "low": price, "close": price, "start_time": now}
 
-    return evaluate_rsi_crossover(closed_candles)
+    return evaluate_scalp_signal(closed_candles)
 
 # ------------------------------------------------------------
-# POSITIONS & TRAILING ENGINE
+# EXECUTIONS & WIDER TRAILING STOP
 # ------------------------------------------------------------
 def get_position():
     if not product_id:
@@ -299,18 +282,13 @@ def close_position_market():
     pos = get_position()
     if pos and abs(pos["size"]) > 0:
         side = "sell" if pos["size"] > 0 else "buy"
-        body = {
-            "product_symbol": SYMBOL,
-            "size": abs(pos["size"]),
-            "side": side,
-            "order_type": "market_order"
-        }
+        body = {"product_symbol": SYMBOL, "size": abs(pos["size"]), "side": side, "order_type": "market_order"}
         private_request("POST", "/v2/orders", body=body)
 
-def run_trailing_stop_loss(entry_price, side, atr, prev_bal):
+def run_scalp_exit_loop(entry_price, side, atr, prev_bal):
     global wins_count, losses_count
-    sl_dist = atr * ATR_MULTIPLIER_SL
-    tp_dist = atr * ATR_MULTIPLIER_TP
+    sl_dist = max(atr * ATR_MULTIPLIER_SL, 0.0005)
+    tp_dist = max(atr * ATR_MULTIPLIER_TP, 0.0008)
 
     if side == "buy":
         current_sl = entry_price - sl_dist
@@ -322,7 +300,7 @@ def run_trailing_stop_loss(entry_price, side, atr, prev_bal):
     while has_position():
         live_p = get_live_ticker_data()
         if live_p is None:
-            time.sleep(0.1)
+            time.sleep(0.05)
             continue
 
         if side == "buy":
@@ -330,14 +308,11 @@ def run_trailing_stop_loss(entry_price, side, atr, prev_bal):
                 close_position_market()
                 send_telegram(f"🎯 TARGET PROFIT HIT @ {live_p:.5f}")
                 break
-                
-            new_sl = live_p - sl_dist
-            if new_sl > current_sl:
-                current_sl = new_sl
-
+            if live_p - sl_dist > current_sl:
+                current_sl = live_p - sl_dist
             if live_p <= current_sl:
                 close_position_market()
-                send_telegram(f"🛑 TRAILING STOP LOSS TRIGGERED @ {live_p:.5f}")
+                send_telegram(f"🛑 STOP LOSS TRIGGERED @ {live_p:.5f}")
                 break
 
         elif side == "sell":
@@ -345,44 +320,33 @@ def run_trailing_stop_loss(entry_price, side, atr, prev_bal):
                 close_position_market()
                 send_telegram(f"🎯 TARGET PROFIT HIT @ {live_p:.5f}")
                 break
-
-            new_sl = live_p + sl_dist
-            if new_sl < current_sl:
-                current_sl = new_sl
-
+            if live_p + sl_dist < current_sl:
+                current_sl = live_p + sl_dist
             if live_p >= current_sl:
                 close_position_market()
-                send_telegram(f"🛑 TRAILING STOP LOSS TRIGGERED @ {live_p:.5f}")
+                send_telegram(f"🛑 STOP LOSS TRIGGERED @ {live_p:.5f}")
                 break
 
-        time.sleep(0.1)
+        time.sleep(0.05)
 
-    time.sleep(1)
+    time.sleep(0.5)
     cur_bal = get_wallet_balance()
     pnl = cur_bal - prev_bal
 
     with stats_lock:
         if pnl > 0:
             wins_count += 1
-            st = "🎉 WIN (PROFIT LOCK)"
+            st = "🎯 WIN"
         elif pnl < 0:
             losses_count += 1
             st = "💥 LOSS"
         else:
-            st = "⚖️ BREAKEVEN"
+            st = "⚖️ EVEN"
 
-        w_cnt, l_cnt = wins_count, losses_count
-        tot = w_cnt + l_cnt
-        wr = (w_cnt / tot * 100) if tot > 0 else 0.0
+        tot = wins_count + losses_count
+        wr = (wins_count / tot * 100) if tot > 0 else 0.0
 
-    report = (
-        f"{st}\n"
-        f"-----------------------------\n"
-        f"📊 Trade PnL: ${pnl:+.2f}\n"
-        f"🏆 Wins: {w_cnt} | ❌ Losses: {l_cnt} ({wr:.1f}% WR)\n"
-        f"💳 Current Balance: ${cur_bal:.2f}"
-    )
-    send_telegram(report)
+    send_telegram(f"{st} | PnL: ${pnl:+.2f} | Balance: ${cur_bal:.2f} | WR: {wr:.1f}%")
 
 def place_market_order(side):
     body = {
@@ -390,17 +354,9 @@ def place_market_order(side):
         "size": LOT_SIZE, 
         "side": side, 
         "order_type": "market_order", 
-        "client_order_id": "RSI_CROSS_" + str(int(time.time()))
+        "client_order_id": "SCALP_" + str(int(time.time() * 1000))
     }
     return private_request("POST", "/v2/orders", body=body)
-
-def wait_for_fill():
-    for _ in range(15):
-        pos = get_position()
-        if pos and abs(pos["size"]) > 0 and pos["entry_price"] > 0:
-            return pos
-        time.sleep(0.05)
-    return None
 
 def execute_trade(side, price, atr):
     global last_trade_time, order_in_progress
@@ -417,28 +373,20 @@ def execute_trade(side, price, atr):
         res = place_market_order(side)
         
         if not res or res.get("success") is False:
-            send_telegram(f"❌ Order Failed: {res}")
             return
         
-        pos = wait_for_fill()
-        if not pos:
+        time.sleep(0.1)
+        pos = get_position()
+        if not pos or abs(pos["size"]) == 0:
             return
         
         entry = pos["entry_price"]
-
-        msg = (
-            f"⚡ RSI 5/14 CROSSOVER TRADE EXECUTED!\n"
-            f"Side: {side.upper()} | Lots: {LOT_SIZE}\n"
-            f"RSI(5): {latest_rsi5:.2f} | RSI(14): {latest_rsi14:.2f}\n"
-            f"Entry Price: {entry:.5f}\n"
-            f"Balance: ${prev_bal:.2f}"
-        )
-        send_telegram(msg)
+        send_telegram(f"⚡ ENTRY {side.upper()} | Lots: {LOT_SIZE} @ {entry:.5f}")
         
-        threading.Thread(target=run_trailing_stop_loss, args=(entry, side, atr, prev_bal), daemon=True).start()
+        threading.Thread(target=run_scalp_exit_loop, args=(entry, side, atr, prev_bal), daemon=True).start()
         last_trade_time = time.time()
     except Exception as e:
-        send_telegram(f"⚠️ Execution Exception: {e}")
+        print(f"Execute Error: {e}")
     finally:
         with order_lock:
             order_in_progress = False
@@ -446,28 +394,8 @@ def execute_trade(side, price, atr):
 # ------------------------------------------------------------
 # TELEGRAM LISTENERS
 # ------------------------------------------------------------
-def send_status_report():
-    st = "🟢 RUNNING" if bot_active else "🔴 PAUSED"
-    cur_bal = get_wallet_balance()
-    pos_status = "In Position" if has_position() else "No Active Position"
-    with stats_lock:
-        w_cnt, l_cnt = wins_count, losses_count
-    total_trades = w_cnt + l_cnt
-    wr = (w_cnt / total_trades * 100) if total_trades > 0 else 0.0
-    
-    report = (
-        f"🤖 BOT STATUS: {st}\n"
-        f"-----------------------------\n"
-        f"💵 Price: {latest_price:.5f}\n"
-        f"📈 RSI(5): {latest_rsi5:.2f} | RSI(14): {latest_rsi14:.2f}\n"
-        f"📍 Position: {pos_status}\n"
-        f"🏆 Wins: {w_cnt} | ❌ Losses: {l_cnt} ({wr:.1f}% WR)\n"
-        f"💳 Balance: ${cur_bal:.2f}"
-    )
-    send_telegram(report)
-
 def telegram_command_listener():
-    global bot_active, order_in_progress
+    global bot_active
     if not TELEGRAM_TOKEN:
         return
     last_update_id = 0
@@ -475,7 +403,7 @@ def telegram_command_listener():
     
     while True:
         try:
-            res = session.get(url, params={"offset": last_update_id + 1, "timeout": 2}, timeout=3)
+            res = session.get(url, params={"offset": last_update_id + 1, "timeout": 2}, timeout=2.5)
             if res and res.status_code == 200:
                 data = res.json()
                 if data.get("ok") and data.get("result"):
@@ -483,23 +411,16 @@ def telegram_command_listener():
                         last_update_id = update["update_id"]
                         msg = update.get("message", {})
                         text = msg.get("text", "").strip().lower()
-                        sender_id = str(msg.get("chat", {}).get("id", ""))
                         
-                        if CHAT_ID and sender_id != CHAT_ID:
-                            continue
-                            
                         if text == "/stop":
                             bot_active = False
-                            send_telegram("🔴 ENGINE PAUSED!")
+                            send_telegram("🔴 BOT PAUSED!")
                         elif text == "/start":
                             bot_active = True
-                            send_telegram("🟢 ENGINE RESUMED!")
-                        elif text == "/reset":
-                            with order_lock:
-                                order_in_progress = False
-                            send_telegram("🔄 ENGINE UNLOCKED!")
+                            send_telegram("🟢 BOT RESUMED!")
                         elif text == "/status":
-                            send_status_report()
+                            cur_bal = get_wallet_balance()
+                            send_telegram(f"🤖 BOT RUNNING\nPrice: {latest_price:.5f}\nBal: ${cur_bal:.2f}")
         except Exception:
             pass
         time.sleep(0.5)
@@ -507,46 +428,34 @@ def telegram_command_listener():
 threading.Thread(target=telegram_command_listener, daemon=True).start()
 
 # ------------------------------------------------------------
-# MAIN BOT ENGINE LOOP (Runs in Background)
+# MAIN ENGINE LOOP (0.01s High Frequency)
 # ------------------------------------------------------------
-def start_trading_engine():
-    print("STARTING RSI 5/14 CROSSOVER ENGINE...", flush=True)
+def start_scalping_engine():
+    print("STARTING SCALPER ENGINE (LOT SIZE: 3)...", flush=True)
     if not load_product():
-        print("❌ Product loading failed, retrying...", flush=True)
         return
-
-    last_score_telegram_time = time.time()
 
     while True:
         try:
             price = get_live_ticker_data()
             if price is None:
-                time.sleep(0.1)
+                time.sleep(0.05)
                 continue
 
             signal, atr_val = process_tick_and_detect_signal(price)
-            print(f"⏱️ P: {price:.5f} | RSI(5): {latest_rsi5:.1f} | RSI(14): {latest_rsi14:.1f} | Sig: {signal}", flush=True)
 
-            if time.time() - last_score_telegram_time >= 300:
-                send_status_report()
-                last_score_telegram_time = time.time()
-
-            if bot_active:
-                if signal in ("buy", "sell") and time.time() - last_trade_time > COOLDOWN_SECONDS:
+            if bot_active and signal in ("buy", "sell"):
+                if time.time() - last_trade_time > COOLDOWN_SECONDS:
                     execute_trade(signal, price, atr_val)
-            time.sleep(0.1)
-        except KeyboardInterrupt:
-            break
+
+            time.sleep(0.01)
         except Exception as e:
-            print(f"⚠️ Loop Exception: {e}", flush=True)
-            time.sleep(0.1)
+            time.sleep(0.05)
 
-# Start Bot Loop asynchronously
-threading.Thread(target=start_trading_engine, daemon=True).start()
+# Background Loop
+threading.Thread(target=start_scalping_engine, daemon=True).start()
 
-# ------------------------------------------------------------
-# START FLASK SERVER IMMEDIATELY (Satisfies Render Free Tier)
-# ------------------------------------------------------------
+# Render Free Tier Web Server Binding
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
