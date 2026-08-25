@@ -28,10 +28,10 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")
 DELTA_API_KEY = os.getenv("DELTA_API_KEY", "YOUR_API_KEY")
 DELTA_API_SECRET = os.getenv("DELTA_API_SECRET", "YOUR_SECRET_KEY")
 
-# --- Trading Configuration for ARCUSD (3x Leverage, 3 Lots) ---
+# --- Trading Configuration for ARCUSD (3x Leverage, 1 Lot) ---
 SYMBOL = "ARCUSD"
 TIMEFRAME = "1m"
-LOT_SIZE = 3         # Total 30 ARC
+LOT_SIZE = 1         # Set to 1 Lot for available margin
 LEVERAGE = 3         # 3x Leverage
 
 is_bot_active = True
@@ -161,7 +161,7 @@ def place_delta_order(side, size, sl_price, tp_price):
         res_data = response.json()
         if response.status_code == 200 and res_data.get('success'):
             total_trades += 1
-            msg = (f"🚀 *ARCUSD TRADE EXECUTED (3x | 3 Lots)*\n\n"
+            msg = (f"🚀 *ARCUSD TRADE EXECUTED (3x | 1 Lot)*\n\n"
                    f"*Side:* {side.upper()}\n"
                    f"*Old Balance:* ${old_balance:.2f}\n"
                    f"*SL:* {sl_price:.4f} | *TP:* {tp_price:.4f}\n\n"
@@ -171,6 +171,7 @@ def place_delta_order(side, size, sl_price, tp_price):
             threading.Thread(target=track_trade_result, args=(old_balance,)).start()
         else:
             print("Order Failed:", res_data)
+            send_telegram_msg(f"⚠️ *Order Failed:* {res_data.get('error', {}).get('code', 'Unknown Error')}")
     except Exception as e:
         print("Execution Exception:", e)
 
@@ -205,7 +206,7 @@ def track_trade_result(old_balance):
 def start_command(update: Update, context: CallbackContext):
     global is_bot_active
     is_bot_active = True
-    update.message.reply_text("✅ *ARCUSD Bot Started!* डेल्टा कनेक्शन और ट्रैकिंग एक्टिव है।", parse_mode="Markdown")
+    update.message.reply_text("✅ *ARCUSD Bot Started!* (1 Lot Configured)", parse_mode="Markdown")
 
 def stop_command(update: Update, context: CallbackContext):
     global is_bot_active
@@ -267,13 +268,13 @@ def trading_loop():
                             sl = curr['low'] - (curr['atr'] * 1.5)
                             tp = curr['close'] + (curr['atr'] * 1.0)
                             place_delta_order("buy", LOT_SIZE, sl, tp)
-                            last_trade_time = time.time()
+                            last_time = time.time()
 
                         elif bearish_sweep:
                             sl = curr['high'] + (curr['atr'] * 1.5)
                             tp = curr['close'] - (curr['atr'] * 1.0)
                             place_delta_order("sell", LOT_SIZE, sl, tp)
-                            last_trade_time = time.time()
+                            last_time = time.time()
 
             except Exception as e:
                 print("Strategy Loop Error:", e)
@@ -291,6 +292,6 @@ if __name__ == '__main__':
     dispatcher.add_handler(CommandHandler("stop", stop_command))
     dispatcher.add_handler(CommandHandler("status", status_command))
     
-    print("ARCUSD 3x Bot Ready with Delta Connection Check...")
+    print("ARCUSD 3x Bot Ready with 1 Lot Configuration...")
     updater.start_polling()
     updater.idle()
