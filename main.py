@@ -99,39 +99,39 @@ def process_structure_pivots(c_data):
     global last_hh, last_ll
     if len(c_data) < 3: return
     
-    # Pivot 1 Logic (Left 1, Candidate, Right 1)
+    # Pivot (1, 1) Window
     c1 = c_data[-3]
     c2 = c_data[-2]
     c3 = c_data[-1]
 
-    # Check Swing High (Pivot 1)
+    # Check Swing High (Pivot High)
     if c2['high'] > c1['high'] and c2['high'] > c3['high']:
         ph = c2['high']
         if last_hh is None or ph > last_hh:
-            last_hh = ph
             execute_direction_trade("BUY")
         else:
             execute_direction_trade("SELL")
+        last_hh = ph  # Continuous state update
 
-    # Check Swing Low (Pivot 1)
+    # Check Swing Low (Pivot Low)
     if c2['low'] < c1['low'] and c2['low'] < c3['low']:
         pl = c2['low']
         if last_ll is None or pl < last_ll:
-            last_ll = pl
             execute_direction_trade("SELL")
         else:
             execute_direction_trade("BUY")
+        last_ll = pl  # Continuous state update
 
 def fetch_candles_and_detect():
     try:
         now = int(time.time())
-        # Fetch 30 Candles (1800 Secs) using official /v2/chart/history endpoint
-        start_time = now - 1800 
+        start_time = now - 1800  # 30 candles (1800 sec)
         
-        url = f"{BASE_URL}/v2/chart/history"
+        # Delta Official REST Candles Endpoint
+        url = f"{BASE_URL}/v2/history/candles"
         params = {
             "symbol": SYMBOL,
-            "resolution": "1",  # Delta Exchange official resolution "1" = 1 minute
+            "resolution": "1m",
             "start": str(start_time),
             "end": str(now)
         }
@@ -140,16 +140,13 @@ def fetch_candles_and_detect():
         
         if res.status_code == 200:
             data = res.json()
-            if isinstance(data, dict) and "h" in data and "l" in data and "c" in data:
-                c_list = [{"high": float(h), "low": float(l), "close": float(c)} for h, l, c in zip(data["h"], data["l"], data["c"])]
-                c_list = c_list[-30:] # Last 30 candles
-                process_structure_pivots(c_list)
-            elif isinstance(data, dict) and "result" in data and data["result"]:
-                c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in data["result"]]
+            raw_candles = data.get("result", [])
+            if raw_candles:
+                c_list = [{"high": float(c["high"]), "low": float(c["low"]), "close": float(c["close"])} for c in raw_candles]
                 c_list = c_list[-30:]
                 process_structure_pivots(c_list)
         else:
-            print(f"API HTTP Status Error: {res.status_code}", flush=True)
+            print(f"API HTTP Status Error: {res.status_code} | Body: {res.text}", flush=True)
 
     except Exception as e:
         print(f"Fetch Error: {e}", flush=True)
