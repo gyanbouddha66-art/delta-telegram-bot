@@ -3,7 +3,11 @@ from flask import Flask
 
 BASE_URL = "https://api.india.delta.exchange"
 SYMBOL = "ARCUSD"
-LOT_SIZE = 3
+
+# RISK & TRADE SETTINGS
+LOT_SIZE = 3           # Lot Size
+SL_PERCENT = 0.008      # 0.8% Stop Loss
+TP_PERCENT = 0.015      # 1.5% Take Profit
 
 API_KEY = os.getenv("API_KEY", "")
 API_SECRET = os.getenv("API_SECRET", "")
@@ -26,7 +30,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "⚡ Market Structure Speed Engine Bot Active 24/7!"
+    return "⚡ Micro Structure Bot Fully Verified & Active 24/7!"
 
 def send_telegram(msg):
     print(f"[TELEGRAM] {msg}", flush=True)
@@ -60,6 +64,14 @@ def private_request(method, endpoint, params=None, body=None):
         print(f"API Request Error: {e}", flush=True)
         return None
 
+def cancel_open_orders():
+    """नए ट्रेड से पहले पुराने ब्रैकेट ऑर्डर्स को कैंसिल करता है"""
+    if not product_id: return
+    try:
+        private_request("DELETE", "/v2/orders/all", params={"product_id": str(product_id)})
+    except Exception as e:
+        print(f"Cancel Orders Error: {e}", flush=True)
+
 def get_position():
     if not product_id: return 0, 0.0
     data = private_request("GET", "/v2/positions", params={"product_id": str(product_id)})
@@ -68,19 +80,56 @@ def get_position():
         return int(float(res.get("size", 0))), float(res.get("entry_price", 0))
     return 0, 0.0
 
-def execute_direction_trade(direction):
+def place_bracket_orders(entry_price, direction, size):
+    if entry_price <= 0: return
+    
+    if direction == "BUY":
+        stop_loss_price = round(entry_price * (1 - SL_PERCENT), 4)
+        take_profit_price = round(entry_price * (1 + TP_PERCENT), 4)
+        close_side = "sell"
+    else:
+        stop_loss_price = round(entry_price * (1 + SL_PERCENT), 4)
+        take_profit_price = round(entry_price * (1 - TP_PERCENT), 4)
+        close_side = "buy"
+
+    # Stop Loss Order
+    sl_payload = {
+        "product_symbol": SYMBOL,
+        "size": size,
+        "side": close_side,
+        "order_type": "stop_market_order",
+        "stop_price": str(stop_loss_price)
+    }
+    private_request("POST", "/v2/orders", body=sl_payload)
+
+    # Take Profit Order
+    tp_payload = {
+        "product_symbol": SYMBOL,
+        "size": size,
+        "side": close_side,
+        "order_type": "limit_order",
+        "limit_price": str(take_profit_price)
+    }
+    private_request("POST", "/v2/orders", body=tp_payload)
+
+    send_telegram(f"🛡️ SL/TP SET: SL @ {stop_loss_price} | TP @ {take_profit_price}")
+
+def execute_direction_trade(direction, structure_type):
     global last_direction
     if direction == last_direction:
-        return
+        return False
         
     with order_lock:
-        size, _ = get_position()
-        print(f"⚡ EXECUTION TRIGGERED: {direction} | Current Pos: {size}", flush=True)
+        size, entry_price = get_position()
+        print(f"⚡ EXECUTION TRIGGERED [{structure_type}]: {direction} | Pos: {size}", flush=True)
         
         target_size = LOT_SIZE if direction == "BUY" else -LOT_SIZE
         order_size = abs(target_size - size)
 
         if order_size > 0:
+            # पुराने पेंडिंग ऑर्डर्स साफ़ करें
+            cancel_open_orders()
+            
             side = "buy" if direction == "BUY" else "sell"
             payload = {
                 "product_symbol": SYMBOL,
@@ -90,42 +139,71 @@ def execute_direction_trade(direction):
             }
             res = private_request("POST", "/v2/orders", body=payload)
             if res and res.get("success"):
-                send_telegram(f"🚀 SMC EXECUTED: {direction} {order_size} LOTS @ {SYMBOL}")
+                send_telegram(f"🚀 [{structure_type}] EXECUTED: {direction} {order_size} LOTS @ {SYMBOL}")
                 last_direction = direction
+                
+                # Dynamic Sync to get correct entry price
+                current_entry = 0.0
+                for _ in range(5):
+                    time.sleep(0.5)
+                    _, current_entry = get_position()
+                    if current_entry > 0:
+                        break
+                
+                if current_entry > 0:
+                    place_bracket_orders(current_entry, direction, order_size)
+                return True
             else:
                 send_telegram(f"❌ ORDER FAILED: {res}")
+                return False
+    return False
 
-def process_structure_pivots(c_data):
+def process_3_segment_structure(c_data):
     global last_hh, last_ll
     if len(c_data) < 3: return
     
-    # Pivot (1, 1) Window
-    c1 = c_data[-3]
-    c2 = c_data[-2]
-    c3 = c_data[-1]
+    prev_candle = c_data[-2]
+    curr_candle = c_data[-1]
 
-    # Check Swing High (Pivot High)
-    if c2['high'] > c1['high'] and c2['high'] > c3['high']:
-        ph = c2['high']
-        if last_hh is None or ph > last_hh:
-            execute_direction_trade("BUY")
-        else:
-            execute_direction_trade("SELL")
-        last_hh = ph
+    curr_high = curr_candle['high']
+    curr_low = curr_candle['low']
+    curr_close = curr_candle['close']
 
-    # Check Swing Low (Pivot Low)
-    if c2['low'] < c1['low'] and c2['low'] < c3['low']:
-        pl = c2['low']
-        if last_ll is None or pl < last_ll:
-            execute_direction_trade("SELL")
-        else:
-            execute_direction_trade("BUY")
-        last_ll = pl
+    if last_hh is None: last_hh = prev_candle['high']
+    if last_ll is None: last_ll = prev_candle['low']
+
+    # 3-Segment Candle Math
+    rng = curr_high - curr_low
+    if rng > 0:
+        one_third = rng / 3.0
+        upper_segment = curr_high - one_third
+        lower_segment = curr_low + one_third
+        
+        in_upper_segment = curr_close >= upper_segment
+        in_lower_segment = curr_close <= lower_segment
+    else:
+        in_upper_segment = True
+        in_lower_segment = True
+
+    # Structure Trigger Logic
+    if curr_high > last_hh and in_upper_segment:
+        if execute_direction_trade("BUY", "HH - BULLISH"):
+            last_hh = curr_high
+
+    elif curr_low < last_ll and in_lower_segment:
+        if execute_direction_trade("SELL", "LL - BEARISH"):
+            last_ll = curr_low
+
+    elif curr_high <= last_hh and curr_low > last_ll:
+        if in_upper_segment:
+            execute_direction_trade("BUY", "HL - REVERSAL")
+        elif in_lower_segment:
+            execute_direction_trade("SELL", "LH - REVERSAL")
 
 def fetch_candles_and_detect():
     try:
         now = int(time.time())
-        start_time = now - 1800  # 30 candles (1800 sec)
+        start_time = now - 600
         
         url = f"{BASE_URL}/v2/history/candles"
         params = {
@@ -135,7 +213,7 @@ def fetch_candles_and_detect():
             "end": str(now)
         }
         headers = {"User-Agent": "Mozilla/5.0"}
-        res = session.get(url, params=params, headers=headers, timeout=4.0)
+        res = session.get(url, params=params, headers=headers, timeout=3.0)
         
         if res.status_code == 200:
             data = res.json()
@@ -148,10 +226,7 @@ def fetch_candles_and_detect():
                     cl = float(c["close"]) if c.get("close") is not None else 0.0
                     c_list.append({"high": h, "low": l, "close": cl})
                 
-                c_list = c_list[-30:]
-                process_structure_pivots(c_list)
-        else:
-            print(f"API HTTP Status Error: {res.status_code} | Body: {res.text}", flush=True)
+                process_3_segment_structure(c_list)
 
     except Exception as e:
         print(f"Fetch Error: {e}", flush=True)
@@ -162,14 +237,14 @@ def start_engine():
         res = session.get(f"{BASE_URL}/v2/products/{SYMBOL}", headers={"User-Agent": "Mozilla/5.0"}, timeout=5.0).json()
         if res and res.get("result"):
             product_id = int(res["result"]["id"])
-            send_telegram(f"⚡ MARKET STRUCTURE ENGINE ACTIVE (30 CANDLES / LOT: {LOT_SIZE})!")
+            send_telegram(f"⚡ FAST HH/LL BOT WITH SAFE SL/TP (LOT: {LOT_SIZE}) ACTIVE!")
     except Exception as e:
         print(f"Product Fetch Error: {e}", flush=True)
 
     while True:
         if bot_active:
             fetch_candles_and_detect()
-        time.sleep(2)
+        time.sleep(1.5)
 
 threading.Thread(target=start_engine, daemon=True).start()
 
