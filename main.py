@@ -7,14 +7,26 @@ import threading
 import requests
 import pandas as pd
 import numpy as np
+from flask import Flask
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, CallbackContext
+
+# --- Flask Server for Render Port Binding ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "ARCUSD Trading Bot is Live and Running!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 # --- Environment Variables ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")
 DELTA_API_KEY = os.getenv("DELTA_API_KEY", "YOUR_API_KEY")
-DELTA_API_SECRET = os.getenv("DELTA_API_SECRET", "YOUR_API_SECRET")
+DELTA_API_SECRET = os.getenv("DELTA_API_SECRET", "YOUR_SECRET_KEY")
 
 # --- Trading Configuration for ARCUSD (3x Leverage, 3 Lots) ---
 SYMBOL = "ARCUSD"
@@ -55,7 +67,6 @@ def get_product_id(symbol):
     return None
 
 def get_wallet_balance():
-    """ डेल्टा अकाउंट से लाइव वॉलेट बैलेंस फेच करने के लिए """
     path = "/v2/wallet/balances"
     url = f"https://api.delta.exchange{path}"
     timestamp = str(int(time.time()))
@@ -86,7 +97,6 @@ def send_telegram_msg(message):
         except Exception as e:
             print("Telegram Alert Error:", e)
 
-# --- Set Leverage Function ---
 def set_leverage(prod_id, leverage):
     path = "/v2/orders/leverage"
     url = f"https://api.delta.exchange{path}"
@@ -112,13 +122,10 @@ def set_leverage(prod_id, leverage):
     except Exception as e:
         print("Set Leverage Exception:", e)
 
-# --- Delta Order Execution Engine with Balance & Winrate Tracker ---
 def place_delta_order(side, size, sl_price, tp_price):
     global total_trades, winning_trades, losing_trades
     
-    # ट्रेड लेने से पहले पुराना बैलेंस नोट करें
     old_balance = get_wallet_balance()
-
     prod_id = get_product_id(SYMBOL)
     if not prod_id:
         print("Product ID not found!")
@@ -161,7 +168,6 @@ def place_delta_order(side, size, sl_price, tp_price):
                    f"⏳ *Target / Stoploss का इंतज़ार है...*")
             send_telegram_msg(msg)
             
-            # बैकग्राउंड में ट्रेड क्लोज होने और नए बैलेंस/विनरेट को ट्रैक करने का थ्रेड
             threading.Thread(target=track_trade_result, args=(old_balance,)).start()
         else:
             print("Order Failed:", res_data)
@@ -170,8 +176,7 @@ def place_delta_order(side, size, sl_price, tp_price):
 
 def track_trade_result(old_balance):
     global total_trades, winning_trades, losing_trades
-    # ट्रेड पूरी होने (TP या SL हिट होने) का अनुमानित इंतज़ार लूप
-    for _ in range(120): # 20 मिनट तक चेक करेगा
+    for _ in range(120):
         time.sleep(10)
         new_balance = get_wallet_balance()
         if new_balance != old_balance and new_balance > 0:
@@ -196,11 +201,11 @@ def track_trade_result(old_balance):
             send_telegram_msg(result_msg)
             break
 
-# --- Telegram Handlers (v13.15 Compatible) ---
+# --- Telegram Handlers ---
 def start_command(update: Update, context: CallbackContext):
     global is_bot_active
     is_bot_active = True
-    update.message.reply_text("✅ *ARCUSD Tracker Bot Started!* बैलेंस और विनरेट ट्रैकिंग चालू है।", parse_mode="Markdown")
+    update.message.reply_text("✅ *ARCUSD Bot Started!* पोर्ट और ट्रैकिंग एक्टिव है।", parse_mode="Markdown")
 
 def stop_command(update: Update, context: CallbackContext):
     global is_bot_active
@@ -215,7 +220,6 @@ def status_command(update: Update, context: CallbackContext):
             f"• Winrate: {winrate:.1f}%")
     update.message.reply_text(text, parse_mode="Markdown")
 
-# --- Fast Strategy Loop ---
 def fetch_candles(symbol, resolution, limit=250):
     url = f"https://api.delta.exchange/v2/history/candles?resolution={resolution}&symbol={symbol}&limit={limit}"
     try:
@@ -273,8 +277,11 @@ def trading_loop():
 
 # --- Main Entry ---
 if __name__ == '__main__':
-    t = threading.Thread(target=trading_loop, daemon=True)
-    t.start()
+    # Flask सर्वर को बैकग्राउंड धागे में चलाना ताकि Render का पोर्ट एरर खत्म हो जाए
+    threading.Thread(target=run_web, daemon=True).start()
+    
+    # ट्रेडिंग लूप चलाना
+    threading.Thread(target=trading_loop, daemon=True).start()
 
     updater = Updater(TELEGRAM_BOT_TOKEN)
     dispatcher = updater.dispatcher
@@ -283,6 +290,6 @@ if __name__ == '__main__':
     dispatcher.add_handler(CommandHandler("stop", stop_command))
     dispatcher.add_handler(CommandHandler("status", status_command))
     
-    print("Balance & Winrate Tracker Bot Ready...")
+    print("Full Flask + Trading Bot Ready...")
     updater.start_polling()
     updater.idle()
