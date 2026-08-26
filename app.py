@@ -5,8 +5,8 @@ from google import genai
 from audio_recorder_streamlit import audio_recorder
 
 # Page Config
-st.set_page_config(page_title="Gemini Trading Manager & Auto Exit", page_icon="🤖", layout="wide")
-st.title("🤖 Gemini AI Trading Manager & Auto Exit Companion")
+st.set_page_config(page_title="BOSS AI Trading Manager", page_icon="⚡", layout="wide")
+st.title("⚡ BOSS Trading & Voice Control System")
 
 # 1. API Keys Setup
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -56,10 +56,10 @@ def close_position(symbol):
         positions = exchange.fetch_positions()
         for p in positions:
             if p['symbol'] == symbol and float(p.get('contracts', 0)) > 0:
-                side_to_close = 'sell' if p['side'].lower() == 'long' or p['side'].lower() == 'buy' else 'buy'
+                side_to_close = 'sell' if p['side'].lower() in ['long', 'buy'] else 'buy'
                 amount = float(p['contracts'])
                 exchange.create_order(symbol=symbol, type='market', side=side_to_close, amount=amount)
-                return f"🚨 **Position Closed!** {symbol} की {amount} quantity मार्केट प्राइस पर बंद कर दी गई है।"
+                return f"🚨 **Position Closed!** {symbol} की {amount} quantity बंद कर दी गई है।"
         return f"⚠️ {symbol} पर कोई ओपन पोजीशन नहीं मिली।"
     except Exception as e:
         return f"❌ **Close Position Error:** {e}"
@@ -82,13 +82,14 @@ def close_all_positions():
     except Exception as e:
         return f"❌ Error: {e}"
 
-# AI Core Processing
-def run_gemini_agent(user_input):
-    with st.spinner("Gemini एनालाइज कर रहा है..."):
+# AI Core Processing (Renamed to BOSS)
+def run_boss_agent(user_input):
+    with st.spinner("BOSS एनालाइज कर रहा है..."):
         try:
             system_prompt = (
-                "You are an expert crypto SMC trader and companion. "
-                "You execute trades with Small TP and Wide SL. "
+                "Your name is BOSS. You are an elite crypto SMC trading assistant and companion. "
+                "Always refer to yourself as BOSS. "
+                "You execute trades with Small TP and Wide SL based on Smart Money Concepts. "
                 "You can also CLOSE trades if user asks or if market structure turns invalid. "
                 "Respond naturally in simple Hindi/Hinglish. "
                 "Triggers for trade operations:\n"
@@ -103,7 +104,7 @@ def run_gemini_agent(user_input):
             )
             
             reply = response.text
-            st.success("🤖 **Gemini AI:**")
+            st.success("🤖 **BOSS AI:**")
             st.write(reply)
 
             # Execution Logic Check
@@ -134,19 +135,19 @@ def run_gemini_agent(user_input):
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("💬 AI Companion & Trading Voice Control")
-    audio_bytes = audio_recorder(text="बोलकर कमांड दें (जैसे: ARCUSD ट्रेड बंद कर दो)", icon_name="microphone", icon_size="2x")
+    st.subheader("💬 BOSS Voice & Command Control")
+    audio_bytes = audio_recorder(text="बोलकर BOSS को कमांड दें", icon_name="microphone", icon_size="2x")
     if audio_bytes and GEMINI_KEY:
         audio_part = genai.types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
-        run_gemini_agent(audio_part)
+        run_boss_agent(audio_part)
 
-    user_text = st.text_input("संदेश या कमांड लिखें:", placeholder="जैसे: 'ARCUSD trade close कर दो' या 'सारे ट्रेड बंद करो'")
-    if st.button("Send / Execute Command"):
+    user_text = st.text_input("संदेश या कमांड लिखें:", placeholder="जैसे: 'BOSS ARCUSD पर 1 buy करो' या 'सारे ट्रेड बंद करो'")
+    if st.button("Ask / Command BOSS"):
         if user_text:
-            run_gemini_agent(user_text)
+            run_boss_agent(user_text)
 
 with col2:
-    st.subheader("📊 Live Open Positions & Control")
+    st.subheader("📊 Live Open Positions")
     
     # Emergency Close All Button
     if st.button("🚨 CLOSE ALL POSITIONS NOW", type="primary"):
