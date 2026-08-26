@@ -1,5 +1,6 @@
 import os
 import asyncio
+import time
 import streamlit as st
 import ccxt
 from google import genai
@@ -103,7 +104,7 @@ def close_all_positions():
     except Exception as e:
         return f"❌ Error: {e}"
 
-# AI Core Processing (Using gemini-3.6-flash as requested by Google)
+# AI Core Processing with Auto Rate-Limit Protection
 def run_boss_agent(user_input):
     with st.spinner("BOSS एनालाइज कर रहा है..."):
         try:
@@ -116,10 +117,18 @@ def run_boss_agent(user_input):
                 "Or for close: [ACTION: CLOSE, SYMBOL: ARCUSD] or [ACTION: CLOSE_ALL]"
             )
             
-            response = client.models.generate_content(
-                model='gemini-3.6-flash',
-                contents=[system_prompt, user_input] if isinstance(user_input, dict) else f"{system_prompt}\nUser: {user_input}"
-            )
+            try:
+                response = client.models.generate_content(
+                    model='gemini-3.6-flash',
+                    contents=[system_prompt, user_input] if isinstance(user_input, dict) else f"{system_prompt}\nUser: {user_input}"
+                )
+            except Exception as api_err:
+                if "429" in str(api_err) or "RESOURCE_EXHAUSTED" in str(api_err):
+                    st.warning("⏳ भाई साहब, बहुत जल्दी-जल्दी कमांड दे दिए! 1 मिनट की लिमिट पूरी हो गई है, कृपया थोड़ा रुककर दोबारा बोलें।")
+                    speak_text("भाई साहब, थोड़ा रुककर कमांड दें, लिमिट पूरी हो गई है।")
+                    return
+                else:
+                    raise api_err
             
             reply = response.text
             st.success("🤖 **BOSS AI:**")
