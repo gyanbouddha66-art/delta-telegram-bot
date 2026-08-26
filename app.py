@@ -31,13 +31,11 @@ exchange = get_delta_exchange()
 # High-Quality Clean Audio (Microsoft Swara HD Voice)
 def speak_text(text):
     try:
-        # Code/Action Tags aur Markdown formatting ko awaj se hatayein
         clean_text = text.split("[ACTION:")[0].strip() if "[ACTION:" in text else text
         clean_text = clean_text.replace("*", "").replace("#", "").replace("`", "")
         
         if clean_text:
             async def generate_voice():
-                # hi-IN-SwaraNeural ekdam natural aur saaf Hindi voice deti hai
                 communicate = edge_tts.Communicate(clean_text, "hi-IN-SwaraNeural")
                 await communicate.save("response.mp3")
             
@@ -105,7 +103,7 @@ def close_all_positions():
     except Exception as e:
         return f"❌ Error: {e}"
 
-# AI Core Processing (Fixed Model to gemini-2.5-flash)
+# AI Core Processing (Using gemini-3.6-flash as requested by Google)
 def run_boss_agent(user_input):
     with st.spinner("BOSS एनालाइज कर रहा है..."):
         try:
@@ -119,7 +117,7 @@ def run_boss_agent(user_input):
             )
             
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-3.6-flash',
                 contents=[system_prompt, user_input] if isinstance(user_input, dict) else f"{system_prompt}\nUser: {user_input}"
             )
             
