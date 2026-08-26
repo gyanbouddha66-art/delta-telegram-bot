@@ -1,6 +1,6 @@
 flask
 requests
-gTTS
+edge-tts
 streamlit
 google-genai
 audio-recorder-streamlit
