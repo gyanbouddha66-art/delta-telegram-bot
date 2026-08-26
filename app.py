@@ -1,10 +1,10 @@
 import os
+import asyncio
 import streamlit as st
 import ccxt
 from google import genai
 from audio_recorder_streamlit import audio_recorder
-from gtts import gTTS
-import base64
+import edge_tts
 
 # Page Config
 st.set_page_config(page_title="BOSS AI Trading Manager", page_icon="⚡", layout="wide")
@@ -28,13 +28,21 @@ def get_delta_exchange():
 
 exchange = get_delta_exchange()
 
-# Helper: Speak Response (Text to Audio)
+# High-Quality Clean Audio (Microsoft Swara HD Voice)
 def speak_text(text):
     try:
+        # Code/Action Tags aur Markdown formatting ko awaj se hatayein
         clean_text = text.split("[ACTION:")[0].strip() if "[ACTION:" in text else text
+        clean_text = clean_text.replace("*", "").replace("#", "").replace("`", "")
+        
         if clean_text:
-            tts = gTTS(text=clean_text, lang='hi', slow=False)
-            tts.save("response.mp3")
+            async def generate_voice():
+                # hi-IN-SwaraNeural ekdam natural aur saaf Hindi voice deti hai
+                communicate = edge_tts.Communicate(clean_text, "hi-IN-SwaraNeural")
+                await communicate.save("response.mp3")
+            
+            asyncio.run(generate_voice())
+            
             with open("response.mp3", "rb") as f:
                 audio_bytes = f.read()
             st.audio(audio_bytes, format="audio/mp3", autoplay=True)
@@ -97,7 +105,7 @@ def close_all_positions():
     except Exception as e:
         return f"❌ Error: {e}"
 
-# AI Core Processing (Fixed Model & Safe Parser)
+# AI Core Processing
 def run_boss_agent(user_input):
     with st.spinner("BOSS एनालाइज कर रहा है..."):
         try:
@@ -119,10 +127,10 @@ def run_boss_agent(user_input):
             st.success("🤖 **BOSS AI:**")
             st.write(reply)
 
-            # Auto Voice Playback
+            # Natural Voice Playback
             speak_text(reply)
 
-            # Safe Action Trigger Parsing
+            # Safe Action Parsing
             if "[ACTION:" in reply:
                 action_part = reply.split("[ACTION:")[1].split("]")[0]
                 items = action_part.split(",")
