@@ -31,18 +31,16 @@ DELTA_API_SECRET = os.getenv("DELTA_API_SECRET", "YOUR_SECRET_KEY")
 # --- Trading Configuration for ARCUSD (3x Leverage, 1 Lot) ---
 SYMBOL = "ARCUSD"
 TIMEFRAME = "1m"
-LOT_SIZE = 1         # Set to 1 Lot for available margin
-LEVERAGE = 3         # 3x Leverage
+LOT_SIZE = 1         
+LEVERAGE = 3         
 
 is_bot_active = True
 product_id_cache = None
 
-# --- Performance Tracking Variables ---
 total_trades = 0
 winning_trades = 0
 losing_trades = 0
 
-# --- Delta API Signature Generator ---
 def generate_signature(method, path, payload, timestamp):
     signature_data = method + timestamp + path + payload
     return hmac.new(
@@ -81,10 +79,19 @@ def get_wallet_balance():
     try:
         response = requests.get(url, headers=headers)
         res_data = response.json()
+        print("Delta Balance Response:", res_data) # Render logs में देखने के लिए
         if response.status_code == 200 and res_data.get('success'):
             for asset in res_data.get('result', []):
-                if asset['asset_symbol'] in ['USDT', 'USD']:
-                    return float(asset.get('balance', 0))
+                # डेल्टा में USDT या USD बैलेंस चेक करना
+                if asset['asset_symbol'] in ['USDT', 'USD', 'ARC']:
+                    bal = float(asset.get('balance', 0))
+                    if bal > 0:
+                        return bal
+            # अगर परमिट या एसेट दूसरे नाम से है तो पहला नॉन-ज़ीरो बैलेंस उठा लेगा
+            for asset in res_data.get('result', []):
+                bal = float(asset.get('balance', 0))
+                if bal > 0:
+                    return bal
     except Exception as e:
         print("Balance Fetch Error:", e)
     return 0.0
@@ -164,14 +171,12 @@ def place_delta_order(side, size, sl_price, tp_price):
             msg = (f"🚀 *ARCUSD TRADE EXECUTED (3x | 1 Lot)*\n\n"
                    f"*Side:* {side.upper()}\n"
                    f"*Old Balance:* ${old_balance:.2f}\n"
-                   f"*SL:* {sl_price:.4f} | *TP:* {tp_price:.4f}\n\n"
-                   f"⏳ *Target / Stoploss का इंतज़ार है...*")
+                   f"*SL:* {sl_price:.4f} | *TP:* {tp_price:.4f}")
             send_telegram_msg(msg)
-            
             threading.Thread(target=track_trade_result, args=(old_balance,)).start()
         else:
             print("Order Failed:", res_data)
-            send_telegram_msg(f"⚠️ *Order Failed:* {res_data.get('error', {}).get('code', 'Unknown Error')}")
+            send_telegram_msg(f"⚠️ *Order Failed:* {res_data}")
     except Exception as e:
         print("Execution Exception:", e)
 
@@ -190,15 +195,7 @@ def track_trade_result(old_balance):
                 status_text = "🔴 *SL HIT (LOSS)* ⚠️"
             
             winrate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
-            
-            result_msg = (f"{status_text}\n\n"
-                          f"*Old Balance:* ${old_balance:.2f}\n"
-                          f"*New Balance:* ${new_balance:.2f}\n"
-                          f"*P&L:* ${diff:+.2f}\n\n"
-                          f"📊 *Winrate Stats:*\n"
-                          f"• Total Trades: {total_trades}\n"
-                          f"• Wins: {winning_trades} | Losses: {losing_trades}\n"
-                          f"• Winrate: {winrate:.1f}%")
+            result_msg = (f"{status_text}\n\n*P&L:* ${diff:+.2f}\n*New Balance:* ${new_balance:.2f}")
             send_telegram_msg(result_msg)
             break
 
@@ -206,7 +203,7 @@ def track_trade_result(old_balance):
 def start_command(update: Update, context: CallbackContext):
     global is_bot_active
     is_bot_active = True
-    update.message.reply_text("✅ *ARCUSD Bot Started!* (1 Lot Configured)", parse_mode="Markdown")
+    update.message.reply_text("✅ *ARCUSD Bot Started!*", parse_mode="Markdown")
 
 def stop_command(update: Update, context: CallbackContext):
     global is_bot_active
@@ -220,7 +217,7 @@ def status_command(update: Update, context: CallbackContext):
     
     text = (f"📊 *Bot Status:* {status}\n"
             f"🔗 *Delta Connected:* Yes ✅\n"
-            f"💰 *Live Wallet Balance:* ${current_balance:.2f}\n"
+            f"💰 *Live Wallet Balance:* ${current_balance:.4f}\n"
             f"• Total Trades: {total_trades}\n"
             f"• Winrate: {winrate:.1f}%")
     update.message.reply_text(text, parse_mode="Markdown")
@@ -241,17 +238,15 @@ def fetch_candles(symbol, resolution, limit=250):
 def trading_loop():
     global is_bot_active
     last_trade_time = 0
-    
     while True:
         if is_bot_active:
             try:
                 df = fetch_candles(SYMBOL, TIMEFRAME)
                 if df is not None and len(df) >= 200:
                     df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
-                    
                     high_low = df['high'] - df['low']
                     high_close = np.abs(df['high'] - df['close'].shift())
-                    low_close = np.abs(df['low'] - df['close'].shift())
+                    low_close = np.abs(df['low'] - df['low'].shift())
                     df['tr'] = np.maximum(high_low, np.maximum(high_close, low_close))
                     df['atr'] = df['tr'].rolling(14).mean()
 
@@ -259,7 +254,6 @@ def trading_loop():
                     df['swing_low'] = df['low'].shift(1).rolling(5).min()
 
                     curr = df.iloc[-1]
-                    
                     bullish_sweep = (curr['low'] < curr['swing_low']) and (curr['close'] > curr['swing_low']) and (curr['close'] > curr['ema200'])
                     bearish_sweep = (curr['high'] > curr['swing_high']) and (curr['close'] < curr['swing_high']) and (curr['close'] < curr['ema200'])
 
@@ -268,19 +262,16 @@ def trading_loop():
                             sl = curr['low'] - (curr['atr'] * 1.5)
                             tp = curr['close'] + (curr['atr'] * 1.0)
                             place_delta_order("buy", LOT_SIZE, sl, tp)
-                            last_time = time.time()
-
+                            last_trade_time = time.time()
                         elif bearish_sweep:
                             sl = curr['high'] + (curr['atr'] * 1.5)
                             tp = curr['close'] - (curr['atr'] * 1.0)
                             place_delta_order("sell", LOT_SIZE, sl, tp)
-                            last_time = time.time()
-
+                            last_trade_time = time.time()
             except Exception as e:
                 print("Strategy Loop Error:", e)
         time.sleep(10)
 
-# --- Main Entry ---
 if __name__ == '__main__':
     threading.Thread(target=run_web, daemon=True).start()
     threading.Thread(target=trading_loop, daemon=True).start()
@@ -292,6 +283,6 @@ if __name__ == '__main__':
     dispatcher.add_handler(CommandHandler("stop", stop_command))
     dispatcher.add_handler(CommandHandler("status", status_command))
     
-    print("ARCUSD 3x Bot Ready with 1 Lot Configuration...")
+    print("Bot Ready...")
     updater.start_polling()
     updater.idle()
