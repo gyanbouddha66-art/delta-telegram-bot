@@ -3,3 +3,4 @@ requests
 gTTS
 streamlit
 google-genai
+audio-recorder-streamlit
