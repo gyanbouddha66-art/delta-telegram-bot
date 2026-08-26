@@ -2,9 +2,11 @@ import os
 import streamlit as st
 from google import genai
 from audio_recorder_streamlit import audio_recorder
+from gtts import gTTS
+import io
 
 # Page Config
-st.set_page_config(page_title="Gemini Trading Assistant", page_icon="🎙️")
+st.set_page_config(page_title="Gemini Fast Voice Trading Assistant", page_icon="🎙️")
 st.title("🎙️ Gemini Powered Trading & Voice Assistant")
 
 # Gemini Setup
@@ -15,51 +17,61 @@ if not GEMINI_KEY:
 else:
     client = genai.Client(api_key=GEMINI_KEY)
 
-st.write("भाई साहब, टेक्स्ट से पूछें या नीचे माइक पर टैप करके अपनी आवाज़ में सवाल रिकॉर्ड करें:")
+# Function to play audio response fast
+def speak(text):
+    try:
+        # Convert text to Hindi speech
+        tts = gTTS(text=text, lang='hi', slow=False)
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        st.audio(fp, format="audio/mp3", autoplay=True)
+    except Exception as e:
+        st.warning(f"Audio Output Error: {e}")
+
+st.write("भाई साहब, बोलकर या लिखकर सवाल पूछें — Gemini तुरंत बोलकर जवाब देगा:")
 
 # Voice Input Section
-st.subheader("🎤 वॉइस से सवाल पूछें")
-audio_bytes = audio_recorder(text="माइक्स रिकॉर्डिंग शुरू करने के लिए टैप करें", icon_name="microphone", icon_size="2x")
+st.subheader("🎤 बोलकर पूछें")
+audio_bytes = audio_recorder(text="रिकॉर्डिंग शुरू करने के लिए टैप करें", icon_name="microphone", icon_size="2x")
 
-user_input = ""
-
-# Audio Processing
 if audio_bytes and GEMINI_KEY:
-    with st.spinner("आपकी आवाज़ सुनी जा रही है..."):
+    with st.spinner("Gemini सुन रहा है और सोच रहा है..."):
         try:
-            # Send audio directly to Gemini 3.6 Flash
+            prompt = "You are a fast SMC trading assistant. Keep response concise (under 3-4 sentences) and answer in natural spoken Hindi/Hinglish."
             response = client.models.generate_content(
                 model='gemini-3.6-flash',
                 contents=[
-                    "You are an expert crypto scalp trader and SMC analyst. Listen to this audio and answer the user's question in simple Hindi/Hinglish.",
-                    genai.types.Part.from_bytes(
-                        data=audio_bytes,
-                        mime_type="audio/wav",
-                    )
+                    prompt,
+                    genai.types.Part.from_bytes(data=audio_bytes, mime_type="audio/wav")
                 ]
             )
-            st.success("🤖 **Gemini AI Voice Reply:**")
-            st.write(response.text)
+            reply_text = response.text
+            st.success("🤖 **Gemini AI Answer:**")
+            st.write(reply_text)
+            speak(reply_text)  # बोलकर सुनाएगा
         except Exception as e:
             st.error(f"Voice Error: {e}")
 
 st.divider()
 
 # Text Input Section
-st.subheader("💬 लिख कर सवाल पूछें")
-text_query = st.text_input("अपनी कमांड या सवाल दर्ज करें:", placeholder="जैसे: ARCUSD में SMC liquidity sweep कैसे देखें?")
+st.subheader("💬 लिखकर पूछें")
+text_query = st.text_input("अपनी कमांड या सवाल दर्ज करें:", placeholder="जैसे: ARCUSD में Liquidity Sweep कैसे पहचानें?")
 
 if st.button("Ask Gemini"):
     if text_query and GEMINI_KEY:
         with st.spinner("Gemini सोच रहा है..."):
             try:
-                prompt = f"You are an expert crypto scalp trader, SMC analyst, and helpful assistant. Answer in simple Hindi/Hinglish: {text_query}"
+                prompt = f"You are a fast SMC trading assistant. Keep response concise (under 3-4 sentences) and answer in natural spoken Hindi/Hinglish: {text_query}"
                 response = client.models.generate_content(
                     model='gemini-3.6-flash',
                     contents=prompt,
                 )
-                st.success("🤖 **Gemini AI Reply:**")
-                st.write(response.text)
+                reply_text = response.text
+                st.success("🤖 **Gemini AI Answer:**")
+                st.write(reply_text)
+                speak(reply_text)  # बोलकर सुनाएगा
             except Exception as e:
                 st.error(f"Error: {e}")
     elif not text_query:
