@@ -8,12 +8,11 @@ import threading
 from flask import Flask
 
 # ============================================================
-# 1. API & BOT CONFIGURATION (DIRECT KEYS FIXED)
+# 1. API & BOT CONFIGURATION
 # ============================================================
 API_KEY = os.environ.get("DELTA_API_KEY", "nHv2Al08t6Bd8O1KSGBXCHP2ZbpmP3")
 API_SECRET = os.environ.get("DELTA_API_SECRET", "tCTPHxKcZxZ2wvk9oMyFrgDRkTK37ryjRNDM6Lhkt6neE2MfIkv9lL5vW8se")
 
-# TELEGRAM DIRECT KEYS (FOR GUARANTEED ALERTS)
 TELEGRAM_BOT_TOKEN = "8919168139:AAFo7kWLd49psCb3f6H-LQaMMSDOg4T8ZvE"
 TELEGRAM_CHAT_ID = "965643127"
 
@@ -21,12 +20,12 @@ BASE_URL = "https://api.india.delta.exchange"
 SYMBOL = "ARCUSD"
 TIMEFRAME = "1m"
 
-# TRADING PARAMETERS
-QTY = 1               # Contract Quantity per trade
-SL_PCT = 0.008        # 0.8% Stop Loss
-TP_PCT = 0.012        # 1.2% Take Profit
-MIN_ER = 0.20         # Trend Efficiency Ratio Filter
-MIN_MOMENTUM = 0.0004 # Fast Price Spike Trigger (0.04%)
+# UPDATED STRATEGY PARAMETERS
+QTY = 1               
+SL_PCT = 0.015        # 1.5% Bada Trailing Stop Loss
+TP_PCT = 0.004        # 0.4% Chhota Take Profit (Fast Hit)
+MIN_ER = 0.20         
+MIN_MOMENTUM = 0.0004 
 
 session = requests.Session()
 in_position = False
@@ -54,9 +53,9 @@ def send_telegram(msg):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
     try:
-        requests.post(url, json=payload, timeout=3)
+        requests.post(url, json=payload, timeout=5)
     except Exception as e:
-        print(f"Telegram Error: {e}")
+        print(f"Telegram Exception: {e}")
 
 # ============================================================
 # 4. DELTA PRIVATE API & DATA HELPERS
@@ -83,14 +82,14 @@ def private_request(method, endpoint, payload=None):
         }
         url = BASE_URL + path
         if method == "GET":
-            return session.get(url, headers=headers, timeout=4).json()
-        return session.post(url, data=payload_str, headers=headers, timeout=4).json()
+            return session.get(url, headers=headers, timeout=5).json()
+        return session.post(url, data=payload_str, headers=headers, timeout=5).json()
     except Exception as e:
         return {"error": str(e)}
 
 def get_product_id():
     try:
-        res = session.get(f"{BASE_URL}/v2/products/{SYMBOL}", timeout=4).json()
+        res = session.get(f"{BASE_URL}/v2/products/{SYMBOL}", timeout=5).json()
         if res and res.get("success"):
             return int(res["result"]["id"])
     except Exception:
@@ -99,7 +98,7 @@ def get_product_id():
 
 def get_live_price():
     try:
-        res = session.get(f"{BASE_URL}/v2/tickers/{SYMBOL}", timeout=4).json()
+        res = session.get(f"{BASE_URL}/v2/tickers/{SYMBOL}", timeout=5).json()
         if res and res.get("success"):
             return float(res["result"]["close"])
     except Exception:
@@ -109,7 +108,7 @@ def get_live_price():
 def fetch_candles():
     try:
         now = int(time.time())
-        res = session.get(f"{BASE_URL}/v2/history/candles", params={"symbol": SYMBOL, "resolution": TIMEFRAME, "start": now - 1800, "end": now}, timeout=4).json()
+        res = session.get(f"{BASE_URL}/v2/history/candles", params={"symbol": SYMBOL, "resolution": TIMEFRAME, "start": now - 1800, "end": now}, timeout=5).json()
         if res and res.get("result"):
             return [float(c["close"]) if isinstance(c, dict) else float(c[4]) for c in reversed(res["result"])]
     except Exception:
@@ -124,25 +123,33 @@ def calculate_er(prices):
     return change / volatility if volatility > 0 else 0.0
 
 # ============================================================
-# 5. FAST ORDER EXECUTION
+# 5. FAST ORDER EXECUTION (CHHOTA TP + TRAILING SL)
 # ============================================================
 def place_fast_trade(side, price, product_id):
     global in_position
     
+    # 0.4% Target
     if side == "buy":
-        sl_price = round(price * (1 - SL_PCT), 5)
         tp_price = round(price * (1 + TP_PCT), 5)
     else:
-        sl_price = round(price * (1 + SL_PCT), 5)
         tp_price = round(price * (1 - TP_PCT), 5)
+
+    # 1.5% Trailing Distance
+    trail_amount = round(price * SL_PCT, 5)
 
     payload = {
         "product_id": product_id,
         "size": QTY,
         "side": side,
         "order_type": "market_order",
-        "stop_loss_order": {"order_type": "market_order", "stop_price": str(sl_price)},
-        "take_profit_order": {"order_type": "market_order", "stop_price": str(tp_price)}
+        "stop_loss_order": {
+            "order_type": "trailing_stop_order", 
+            "trail_amount": str(trail_amount)
+        },
+        "take_profit_order": {
+            "order_type": "market_order", 
+            "stop_price": str(tp_price)
+        }
     }
 
     send_telegram(f"⚡ *FAST SIGNAL TRIGGERED!*\nSending `{side.upper()}` Order at `{price}`...")
@@ -150,54 +157,61 @@ def place_fast_trade(side, price, product_id):
 
     if res and res.get("success"):
         in_position = True
-        send_telegram(f"🚀 *ORDER EXECUTED!*\nSide: `{side.upper()}`\nEntry: `{price}`\nSL: `{sl_price}` | TP: `{tp_price}`")
+        send_telegram(f"🚀 *ORDER EXECUTED!*\nSide: `{side.upper()}`\nEntry: `{price}`\nTrailing SL Amount: `{trail_amount}` | Fast TP: `{tp_price}`")
     else:
         send_telegram(f"❌ *ORDER FAILED:* `{res}`")
 
 # ============================================================
-# 6. FAST TRADING SCANNER LOOP
+# 6. SCANNER LOOP WITH AUTO-RECOVERY
 # ============================================================
 def fast_trader_loop():
     global in_position
-    time.sleep(2)
-    product_id = get_product_id()
-    if not product_id:
-        send_telegram("❌ Product ID fetch failed. Check Internet/Symbol.")
-        return
-
-    # STARTUP TELEGRAM NOTIFICATION
-    send_telegram(f"⚡ *FAST TRADER LIVE ON RENDER!*\nPair: `{SYMBOL}`\nScanning every 1 second...")
+    time.sleep(3)
     
-    last_price = get_live_price()
+    send_telegram(f"⚡ *FAST TRADER SYSTEM LIVE!*\nPair: `{SYMBOL}`\nStrategy: 0.4% Fast TP | 1.5% Trailing SL")
 
     while True:
         try:
-            time.sleep(1)
-            price = get_live_price()
-            if not price or not last_price:
-                last_price = price
+            product_id = get_product_id()
+            if not product_id:
+                time.sleep(5)
                 continue
 
-            if in_position:
-                time.sleep(60)
-                in_position = False
-                continue
+            last_price = get_live_price()
 
-            price_change = (price - last_price) / last_price
+            while True:
+                try:
+                    time.sleep(1)
+                    price = get_live_price()
+                    if not price or not last_price:
+                        last_price = price
+                        continue
 
-            if abs(price_change) >= MIN_MOMENTUM:
-                candles = fetch_candles()
-                er = calculate_er(candles)
+                    if in_position:
+                        time.sleep(60)
+                        in_position = False
+                        continue
 
-                if er >= MIN_ER:
-                    if price_change > 0:
-                        place_fast_trade("buy", price, product_id)
-                    else:
-                        place_fast_trade("sell", price, product_id)
+                    price_change = (price - last_price) / last_price
 
-            last_price = price
-        except Exception as e:
-            time.sleep(1)
+                    if abs(price_change) >= MIN_MOMENTUM:
+                        candles = fetch_candles()
+                        er = calculate_er(candles)
+
+                        if er >= MIN_ER:
+                            if price_change > 0:
+                                place_fast_trade("buy", price, product_id)
+                            else:
+                                place_fast_trade("sell", price, product_id)
+
+                    last_price = price
+
+                except Exception as inner_e:
+                    time.sleep(2)
+
+        except Exception as outer_e:
+            send_telegram(f"⚠️ *Scanner Auto-restarting... Error:* `{outer_e}`")
+            time.sleep(5)
 
 # ============================================================
 # MAIN THREADS
