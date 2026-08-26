@@ -40,6 +40,14 @@ total_trades = 0
 winning_trades = 0
 losing_trades = 0
 
+# --- Render IP Check Function ---
+def check_render_ip():
+    try:
+        ip_response = requests.get("https://api.ipify.org?format=json").json()
+        print("🔥 Render Outbound IP Address:", ip_response.get("ip"))
+    except Exception as e:
+        print("IP Check Error:", e)
+
 def generate_signature(method, path, payload, timestamp):
     signature_data = method + timestamp + path + payload
     return hmac.new(
@@ -122,7 +130,6 @@ def place_instant_order(side, size, current_price):
 
     set_leverage(prod_id, LEVERAGE)
 
-    # इंस्टेंट और फास्ट टारगेट्स (0.5% SL और 1% TP)
     sl = current_price * (0.995 if side == "buy" else 1.005)
     tp = current_price * (1.010 if side == "buy" else 0.990)
 
@@ -190,15 +197,17 @@ def fast_trading_loop():
                     close_price = float(latest['close'])
                     open_price = float(latest['open'])
                     
-                    # जैसे ही मार्केट में जरा भी ग्रीन कैंडल बने, तुरंत बाय ठोक देगा (इन्स्टेंट)
                     if close_price > open_price:
                         place_instant_order("buy", LOT_SIZE, close_price)
-                        time.sleep(30) # बार-बार लगातार ट्रेड रोकने के लिए गैप
+                        time.sleep(30)
             except Exception as e:
                 print("Loop Error:", e)
         time.sleep(10)
 
 if __name__ == '__main__':
+    # बॉट शुरू होते ही Render का आईपी लॉग में प्रिंट हो जाएगा
+    check_render_ip()
+    
     threading.Thread(target=run_web, daemon=True).start()
     threading.Thread(target=fast_trading_loop, daemon=True).start()
 
