@@ -25,7 +25,7 @@ if st.button("Ask Gemini"):
             try:
                 prompt = f"You are an expert crypto scalp trader, SMC analyst, and helpful assistant. Answer in simple Hindi/Hinglish: {user_input}"
                 response = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-3.6-flash',
                     contents=prompt,
                 )
                 st.success("🤖 **Gemini AI Reply:**")
