@@ -105,7 +105,7 @@ def close_all_positions():
     except Exception as e:
         return f"❌ Error: {e}"
 
-# AI Core Processing
+# AI Core Processing (Fixed Model to gemini-2.5-flash)
 def run_boss_agent(user_input):
     with st.spinner("BOSS एनालाइज कर रहा है..."):
         try:
@@ -119,7 +119,7 @@ def run_boss_agent(user_input):
             )
             
             response = client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.5-flash',
                 contents=[system_prompt, user_input] if isinstance(user_input, dict) else f"{system_prompt}\nUser: {user_input}"
             )
             
