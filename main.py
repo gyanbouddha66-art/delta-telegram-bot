@@ -8,12 +8,14 @@ import threading
 from flask import Flask
 
 # ============================================================
-# 1. API & BOT CONFIGURATION
+# 1. API & BOT CONFIGURATION (DIRECT KEYS FIXED)
 # ============================================================
 API_KEY = os.environ.get("DELTA_API_KEY", "nHv2Al08t6Bd8O1KSGBXCHP2ZbpmP3")
 API_SECRET = os.environ.get("DELTA_API_SECRET", "tCTPHxKcZxZ2wvk9oMyFrgDRkTK37ryjRNDM6Lhkt6neE2MfIkv9lL5vW8se")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+# TELEGRAM DIRECT KEYS (FOR GUARANTEED ALERTS)
+TELEGRAM_BOT_TOKEN = "8919168139:AAFo7kWLd49psCb3f6H-LQaMMSDOg4T8ZvE"
+TELEGRAM_CHAT_ID = "965643127"
 
 BASE_URL = "https://api.india.delta.exchange"
 SYMBOL = "ARCUSD"
@@ -21,13 +23,13 @@ TIMEFRAME = "1m"
 
 # TRADING PARAMETERS
 QTY = 1               # Contract Quantity per trade
-SL_PCT = 0.008        # 0.8% Stop Loss (Fast SL)
-TP_PCT = 0.012        # 1.2% Take Profit (Fast TP)
+SL_PCT = 0.008        # 0.8% Stop Loss
+TP_PCT = 0.012        # 1.2% Take Profit
 MIN_ER = 0.20         # Trend Efficiency Ratio Filter
 MIN_MOMENTUM = 0.0004 # Fast Price Spike Trigger (0.04%)
 
 session = requests.Session()
-in_position = False   # Flag to avoid duplicate orders
+in_position = False
 
 # ============================================================
 # 2. RENDER HEALTH CHECK SERVER
@@ -53,8 +55,8 @@ def send_telegram(msg):
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
     try:
         requests.post(url, json=payload, timeout=3)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Telegram Error: {e}")
 
 # ============================================================
 # 4. DELTA PRIVATE API & DATA HELPERS
@@ -157,31 +159,30 @@ def place_fast_trade(side, price, product_id):
 # ============================================================
 def fast_trader_loop():
     global in_position
+    time.sleep(2)
     product_id = get_product_id()
     if not product_id:
         send_telegram("❌ Product ID fetch failed. Check Internet/Symbol.")
         return
 
-    send_telegram(f"⚡ *FAST TRADER LIVE!*\nPair: `{SYMBOL}`\nScanning every 1 second for fast spikes...")
+    # STARTUP TELEGRAM NOTIFICATION
+    send_telegram(f"⚡ *FAST TRADER LIVE ON RENDER!*\nPair: `{SYMBOL}`\nScanning every 1 second...")
     
     last_price = get_live_price()
 
     while True:
         try:
-            time.sleep(1) # Fast 1-Second Loop
+            time.sleep(1)
             price = get_live_price()
             if not price or not last_price:
                 last_price = price
                 continue
 
-            # Skip if already in trade
             if in_position:
-                # 60 Sec cooldown between trades
                 time.sleep(60)
                 in_position = False
                 continue
 
-            # Fast Momentum Calculation
             price_change = (price - last_price) / last_price
 
             if abs(price_change) >= MIN_MOMENTUM:
