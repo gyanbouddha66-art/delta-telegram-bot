@@ -11,8 +11,7 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 if GEMINI_KEY:
     genai.configure(api_key=GEMINI_KEY)
-    model = genai.GenerativeModel("gemini-1.5-flash")
-else:
+    model = genai.GenerativeModel("gemini-2.5-flash")
     st.error("⚠️ Gemini API Key नहीं मिली! Please Set GEMINI_API_KEY in Environment Settings.")
 
 # UI Layout
