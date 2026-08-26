@@ -31,20 +31,17 @@ exchange = get_delta_exchange()
 # Helper: Speak Response (Text to Audio)
 def speak_text(text):
     try:
-        # Action tags ko audio se hatayein
         clean_text = text.split("[ACTION:")[0].strip() if "[ACTION:" in text else text
         if clean_text:
             tts = gTTS(text=clean_text, lang='hi', slow=False)
             tts.save("response.mp3")
             with open("response.mp3", "rb") as f:
                 audio_bytes = f.read()
-            b64_audio = base64.b64encode(audio_bytes).decode()
-            audio_html = f'<audio src="data:audio/mp3;base64,{b64_audio}" autoplay controls style="width: 100%; margin-top: 10px;"></audio>'
-            st.markdown(audio_html, unsafe_allow_html=True)
+            st.audio(audio_bytes, format="audio/mp3", autoplay=True)
     except Exception as e:
         st.error(f"Audio Error: {e}")
 
-# Trade Execution Engine
+# Trade Execution Engine (Small TP & Wide SL)
 def execute_smc_trade(symbol, side, amount, tp_percent=0.5, sl_percent=2.0):
     if not exchange:
         return "⚠️ Delta Exchange API Key / Secret missing!"
@@ -66,6 +63,7 @@ def execute_smc_trade(symbol, side, amount, tp_percent=0.5, sl_percent=2.0):
     except Exception as e:
         return f"❌ **Execution Error:** {e}"
 
+# Close Specific Position
 def close_position(symbol):
     if not exchange:
         return "⚠️ Exchange Connected नहीं है!"
@@ -81,6 +79,7 @@ def close_position(symbol):
     except Exception as e:
         return f"❌ **Close Position Error:** {e}"
 
+# Emergency Close All Positions
 def close_all_positions():
     if not exchange:
         return "⚠️ Exchange Connected नहीं है!"
@@ -98,7 +97,7 @@ def close_all_positions():
     except Exception as e:
         return f"❌ Error: {e}"
 
-# AI Core Processing
+# AI Core Processing (Fixed Model & Safe Parser)
 def run_boss_agent(user_input):
     with st.spinner("BOSS एनालाइज कर रहा है..."):
         try:
@@ -106,14 +105,13 @@ def run_boss_agent(user_input):
                 "Your name is BOSS. You are an elite crypto SMC trading assistant and companion. "
                 "Always refer to yourself as BOSS. Speak in natural Hindi / Hinglish. "
                 "You execute trades with Small TP and Wide SL based on Smart Money Concepts. "
-                "Triggers format at the VERY START of response if trade action needed:\n"
-                "1. Open Trade: '[ACTION: BUY, SYMBOL: ARCUSD, AMOUNT: 1.0, TP: 0.5, SL: 2.0]'\n"
-                "2. Close Trade: '[ACTION: CLOSE, SYMBOL: ARCUSD]'\n"
-                "3. Close ALL: '[ACTION: CLOSE_ALL]'"
+                "If trade execution is required, output the trigger strictly in this format at the end:\n"
+                "[ACTION: BUY, SYMBOL: ARCUSD, AMOUNT: 1.0, TP: 0.5, SL: 2.0]\n"
+                "Or for close: [ACTION: CLOSE, SYMBOL: ARCUSD] or [ACTION: CLOSE_ALL]"
             )
             
             response = client.models.generate_content(
-                model='gemini-3.6-flash',
+                model='gemini-1.5-flash',
                 contents=[system_prompt, user_input] if isinstance(user_input, dict) else f"{system_prompt}\nUser: {user_input}"
             )
             
@@ -124,7 +122,7 @@ def run_boss_agent(user_input):
             # Auto Voice Playback
             speak_text(reply)
 
-            # Execution Logic Check (Safe Parser)
+            # Safe Action Trigger Parsing
             if "[ACTION:" in reply:
                 action_part = reply.split("[ACTION:")[1].split("]")[0]
                 items = action_part.split(",")
@@ -132,10 +130,10 @@ def run_boss_agent(user_input):
                 for item in items:
                     if ":" in item:
                         k, v = item.split(":", 1)
-                        parts[k.strip()] = v.strip()
+                        parts[k.strip().upper()] = v.strip()
                 
-                action = parts.get("ACTION", "").strip()
-                symbol = parts.get("SYMBOL", "ARCUSD").strip()
+                action = parts.get("ACTION", "").upper()
+                symbol = parts.get("SYMBOL", "ARCUSD").upper()
 
                 if action in ["BUY", "SELL"]:
                     amount = float(parts.get("AMOUNT", 1.0))
