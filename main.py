@@ -16,7 +16,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "ARCUSD Trading Bot is Live and Running!"
+    return "Instant ARCUSD Bot is Live!"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -28,7 +28,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")
 DELTA_API_KEY = os.getenv("DELTA_API_KEY", "YOUR_API_KEY")
 DELTA_API_SECRET = os.getenv("DELTA_API_SECRET", "YOUR_SECRET_KEY")
 
-# --- Trading Configuration for ARCUSD (3x Leverage, 1 Lot) ---
+# --- Trading Config ---
 SYMBOL = "ARCUSD"
 TIMEFRAME = "1m"
 LOT_SIZE = 1         
@@ -36,7 +36,6 @@ LEVERAGE = 3
 
 is_bot_active = True
 product_id_cache = None
-
 total_trades = 0
 winning_trades = 0
 losing_trades = 0
@@ -61,7 +60,7 @@ def get_product_id(symbol):
                     product_id_cache = p['id']
                     return product_id_cache
     except Exception as e:
-        print("Product ID Fetch Error:", e)
+        print("Product ID Error:", e)
     return None
 
 def get_wallet_balance():
@@ -79,21 +78,13 @@ def get_wallet_balance():
     try:
         response = requests.get(url, headers=headers)
         res_data = response.json()
-        print("Delta Balance Response:", res_data) # Render logs में देखने के लिए
         if response.status_code == 200 and res_data.get('success'):
-            for asset in res_data.get('result', []):
-                # डेल्टा में USDT या USD बैलेंस चेक करना
-                if asset['asset_symbol'] in ['USDT', 'USD', 'ARC']:
-                    bal = float(asset.get('balance', 0))
-                    if bal > 0:
-                        return bal
-            # अगर परमिट या एसेट दूसरे नाम से है तो पहला नॉन-ज़ीरो बैलेंस उठा लेगा
             for asset in res_data.get('result', []):
                 bal = float(asset.get('balance', 0))
                 if bal > 0:
                     return bal
     except Exception as e:
-        print("Balance Fetch Error:", e)
+        print("Balance Error:", e)
     return 0.0
 
 def send_telegram_msg(message):
@@ -102,19 +93,13 @@ def send_telegram_msg(message):
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
             requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"})
         except Exception as e:
-            print("Telegram Alert Error:", e)
+            print("Telegram Error:", e)
 
 def set_leverage(prod_id, leverage):
     path = "/v2/orders/leverage"
     url = f"https://api.delta.exchange{path}"
     timestamp = str(int(time.time()))
-    
-    payload_dict = {
-        "product_id": prod_id,
-        "leverage": leverage
-    }
-    
-    payload_str = json.dumps(payload_dict)
+    payload_str = json.dumps({"product_id": prod_id, "leverage": leverage})
     signature = generate_signature("POST", path, payload_str, timestamp)
 
     headers = {
@@ -123,22 +108,23 @@ def set_leverage(prod_id, leverage):
         "signature": signature,
         "Content-Type": "application/json"
     }
-
     try:
         requests.post(url, data=payload_str, headers=headers)
     except Exception as e:
-        print("Set Leverage Exception:", e)
+        print("Leverage Error:", e)
 
-def place_delta_order(side, size, sl_price, tp_price):
-    global total_trades, winning_trades, losing_trades
-    
+def place_instant_order(side, size, current_price):
+    global total_trades
     old_balance = get_wallet_balance()
     prod_id = get_product_id(SYMBOL)
     if not prod_id:
-        print("Product ID not found!")
         return
 
     set_leverage(prod_id, LEVERAGE)
+
+    # इंस्टेंट और फास्ट टारगेट्स (0.5% SL और 1% TP)
+    sl = current_price * (0.995 if side == "buy" else 1.005)
+    tp = current_price * (1.010 if side == "buy" else 0.990)
 
     path = "/v2/orders"
     url = f"https://api.delta.exchange{path}"
@@ -149,8 +135,8 @@ def place_delta_order(side, size, sl_price, tp_price):
         "size": size,
         "side": side,
         "order_type": "market_order",
-        "stop_loss_price": str(round(sl_price, 4)),
-        "take_profit_price": str(round(tp_price, 4))
+        "stop_loss_price": str(round(sl, 4)),
+        "take_profit_price": str(round(tp, 4))
     }
     
     payload_str = json.dumps(payload_dict)
@@ -168,42 +154,18 @@ def place_delta_order(side, size, sl_price, tp_price):
         res_data = response.json()
         if response.status_code == 200 and res_data.get('success'):
             total_trades += 1
-            msg = (f"🚀 *ARCUSD TRADE EXECUTED (3x | 1 Lot)*\n\n"
-                   f"*Side:* {side.upper()}\n"
-                   f"*Old Balance:* ${old_balance:.2f}\n"
-                   f"*SL:* {sl_price:.4f} | *TP:* {tp_price:.4f}")
+            msg = f"⚡ *INSTANT TRADE EXECUTED*\n*Side:* {side.upper()}\n*Price:* {current_price}"
             send_telegram_msg(msg)
-            threading.Thread(target=track_trade_result, args=(old_balance,)).start()
         else:
-            print("Order Failed:", res_data)
-            send_telegram_msg(f"⚠️ *Order Failed:* {res_data}")
+            send_telegram_msg(f"⚠️ *Trade Error:* {res_data}")
     except Exception as e:
-        print("Execution Exception:", e)
+        print("Order Exception:", e)
 
-def track_trade_result(old_balance):
-    global total_trades, winning_trades, losing_trades
-    for _ in range(120):
-        time.sleep(10)
-        new_balance = get_wallet_balance()
-        if new_balance != old_balance and new_balance > 0:
-            diff = new_balance - old_balance
-            if diff > 0:
-                winning_trades += 1
-                status_text = "🟢 *TP HIT (PROFIT)* 🎉"
-            else:
-                losing_trades += 1
-                status_text = "🔴 *SL HIT (LOSS)* ⚠️"
-            
-            winrate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
-            result_msg = (f"{status_text}\n\n*P&L:* ${diff:+.2f}\n*New Balance:* ${new_balance:.2f}")
-            send_telegram_msg(result_msg)
-            break
-
-# --- Telegram Handlers ---
+# --- Telegram Commands ---
 def start_command(update: Update, context: CallbackContext):
     global is_bot_active
     is_bot_active = True
-    update.message.reply_text("✅ *ARCUSD Bot Started!*", parse_mode="Markdown")
+    update.message.reply_text("✅ *Instant Bot Started!*", parse_mode="Markdown")
 
 def stop_command(update: Update, context: CallbackContext):
     global is_bot_active
@@ -212,69 +174,33 @@ def stop_command(update: Update, context: CallbackContext):
 
 def status_command(update: Update, context: CallbackContext):
     current_balance = get_wallet_balance()
-    winrate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
     status = "RUNNING 🟢" if is_bot_active else "STOPPED 🔴"
-    
-    text = (f"📊 *Bot Status:* {status}\n"
-            f"🔗 *Delta Connected:* Yes ✅\n"
-            f"💰 *Live Wallet Balance:* ${current_balance:.4f}\n"
-            f"• Total Trades: {total_trades}\n"
-            f"• Winrate: {winrate:.1f}%")
+    text = f"📊 *Status:* {status}\n💰 *Balance:* ${current_balance:.4f}\n• Trades: {total_trades}"
     update.message.reply_text(text, parse_mode="Markdown")
 
-def fetch_candles(symbol, resolution, limit=250):
-    url = f"https://api.delta.exchange/v2/history/candles?resolution={resolution}&symbol={symbol}&limit={limit}"
-    try:
-        res = requests.get(url).json()
-        if 'result' in res:
-            df = pd.DataFrame(res['result']).iloc[::-1].reset_index(drop=True)
-            for col in ['close', 'high', 'low', 'open']:
-                df[col] = df[col].astype(float)
-            return df
-    except Exception as e:
-        print("API Fetch Error:", e)
-    return None
-
-def trading_loop():
+def fast_trading_loop():
     global is_bot_active
-    last_trade_time = 0
     while True:
         if is_bot_active:
             try:
-                df = fetch_candles(SYMBOL, TIMEFRAME)
-                if df is not None and len(df) >= 200:
-                    df['ema200'] = df['close'].ewm(span=200, adjust=False).mean()
-                    high_low = df['high'] - df['low']
-                    high_close = np.abs(df['high'] - df['close'].shift())
-                    low_close = np.abs(df['low'] - df['low'].shift())
-                    df['tr'] = np.maximum(high_low, np.maximum(high_close, low_close))
-                    df['atr'] = df['tr'].rolling(14).mean()
-
-                    df['swing_high'] = df['high'].shift(1).rolling(5).max()
-                    df['swing_low'] = df['low'].shift(1).rolling(5).min()
-
-                    curr = df.iloc[-1]
-                    bullish_sweep = (curr['low'] < curr['swing_low']) and (curr['close'] > curr['swing_low']) and (curr['close'] > curr['ema200'])
-                    bearish_sweep = (curr['high'] > curr['swing_high']) and (curr['close'] < curr['swing_high']) and (curr['close'] < curr['ema200'])
-
-                    if time.time() - last_trade_time > 60:
-                        if bullish_sweep:
-                            sl = curr['low'] - (curr['atr'] * 1.5)
-                            tp = curr['close'] + (curr['atr'] * 1.0)
-                            place_delta_order("buy", LOT_SIZE, sl, tp)
-                            last_trade_time = time.time()
-                        elif bearish_sweep:
-                            sl = curr['high'] + (curr['atr'] * 1.5)
-                            tp = curr['close'] - (curr['atr'] * 1.0)
-                            place_delta_order("sell", LOT_SIZE, sl, tp)
-                            last_trade_time = time.time()
+                url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&symbol={SYMBOL}&limit=5"
+                res = requests.get(url).json()
+                if 'result' in res and len(res['result']) > 0:
+                    latest = res['result'][0]
+                    close_price = float(latest['close'])
+                    open_price = float(latest['open'])
+                    
+                    # जैसे ही मार्केट में जरा भी ग्रीन कैंडल बने, तुरंत बाय ठोक देगा (इन्स्टेंट)
+                    if close_price > open_price:
+                        place_instant_order("buy", LOT_SIZE, close_price)
+                        time.sleep(30) # बार-बार लगातार ट्रेड रोकने के लिए गैप
             except Exception as e:
-                print("Strategy Loop Error:", e)
+                print("Loop Error:", e)
         time.sleep(10)
 
 if __name__ == '__main__':
     threading.Thread(target=run_web, daemon=True).start()
-    threading.Thread(target=trading_loop, daemon=True).start()
+    threading.Thread(target=fast_trading_loop, daemon=True).start()
 
     updater = Updater(TELEGRAM_BOT_TOKEN)
     dispatcher = updater.dispatcher
@@ -283,6 +209,5 @@ if __name__ == '__main__':
     dispatcher.add_handler(CommandHandler("stop", stop_command))
     dispatcher.add_handler(CommandHandler("status", status_command))
     
-    print("Bot Ready...")
     updater.start_polling()
     updater.idle()
