@@ -2,4 +2,4 @@ flask
 requests
 gTTS
 streamlit
-google-generativeai
+google-genai
