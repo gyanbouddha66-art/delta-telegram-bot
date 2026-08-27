@@ -1,201 +1,105 @@
 import os
+import time
+import threading
 import streamlit as st
 import ccxt
+import requests
 from google import genai
 import streamlit.components.v1 as components
 
-# Page Config
-st.set_page_config(page_title="BOSS AI - Smart & Fast", page_icon="⚡", layout="wide")
-st.title("⚡ BOSS Smart AI - Super Fast Real-Time Assistant")
+# --- 1. CONFIGURATIONS ---
+TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"  # अपना Telegram Bot Token डालें
+TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"              # अपनी Chat ID डालें
+GEMINI_API_KEY = "AQ.Ab8RN6LRNq3mOnbnzB3T3Yny8Uskk7DRpOajm6ssmHXavzPYAg"
 
-# --- SIDEBAR FOR SECURE API KEYS INPUT ---
-st.sidebar.header("🔑 API Keys Setup")
-st.sidebar.write("यहाँ अपनी चाबियाँ दर्ज करें:")
+DELTA_API_KEY = "nHv2Al08t6Bd8O1KSGBXCHP2ZbpmP3"
+DELTA_API_SECRET = "tCTPHxKcZxZ2wvk9oMyFrgDRkTK37ryjRNDM6Lhkt6neE2MfIkv9lL5vW8se"
 
-input_gemini_key = st.sidebar.text_input("Gemini API Key", type="password", value=os.environ.get("GEMINI_API_KEY", ""))
-input_delta_key = st.sidebar.text_input("Delta API Key", type="password", value=os.environ.get("DELTA_API_KEY", ""))
-input_delta_secret = st.sidebar.text_input("Delta API Secret", type="password", value=os.environ.get("DELTA_API_SECRET", ""))
+SYMBOL = 'BTC/USDT:USDT'  # ट्रेडिंग पेयर
+AMOUNT = 1.0              # ट्रेड साइज
+CHECK_INTERVAL = 60       # हर 1 मिनट में BOSS मार्केट एनालाइज करेगा
 
-GEMINI_KEY = input_gemini_key or st.secrets.get("GEMINI_API_KEY", "")
-DELTA_KEY = input_delta_key or st.secrets.get("DELTA_API_KEY", "")
-DELTA_SECRET = input_delta_secret or st.secrets.get("DELTA_API_SECRET", "")
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
-
-def get_delta_exchange():
-    if DELTA_KEY and DELTA_SECRET:
-        try:
-            return ccxt.delta({
-                'apiKey': DELTA_KEY,
-                'secret': DELTA_SECRET,
-                'enableRateLimit': True,
-            })
-        except Exception:
-            return None
-    return None
-
-exchange = get_delta_exchange()
-
-# Instant Browser Speech Synthesis (Zero Lag, Gemini Style Audio)
-def speak_instantly(text):
-    clean_text = text.split("[ACTION:")[0].strip() if "[ACTION:" in text else text
-    clean_text = clean_text.replace("*", "").replace("#", "").replace("`", "").replace('"', '').replace("'", "")
-    
-    js_code = f"""
-    <script>
-        if ('speechSynthesis' in window) {{
-            window.speechSynthesis.cancel();
-            let utterance = new SpeechSynthesisUtterance("{clean_text}");
-            utterance.lang = 'hi-IN';
-            utterance.rate = 1.0;
-            window.speechSynthesis.speak(utterance);
-        }}
-    </script>
-    """
-    components.html(js_code, height=0)
-
-# Autonomous Trade Execution
-def execute_autonomous_trade(symbol, side, amount):
-    if not exchange:
-        return "⚠️ Delta Exchange API Key / Secret सही से दर्ज नहीं हैं!"
+def send_telegram_message(message):
+    """Telegram पर तुरंत अलर्ट भेजने के लिए"""
     try:
-        order = exchange.create_order(symbol=symbol, type='market', side=side.lower(), amount=amount)
-        price = float(order.get('price') or exchange.fetch_ticker(symbol)['last'])
-        return f"✅ **BOSS ने ट्रेड ले लिया है!**\n- Side: {side.upper()}\n- Symbol: {symbol}\n- Entry Price: {price}"
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
+        requests.post(url, json=payload)
     except Exception as e:
-        return f"❌ **Execution Error:** {e}"
+        print(f"❌ Telegram Error: {e}")
 
-def close_autonomous_position(symbol):
-    if not exchange:
-        return "⚠️ Exchange Connected नहीं है!"
+def boss_autonomous_trading_loop():
+    """यह बैकग्राउंड लूप बिना किसी फिक्स कंडीशन के खुद AI से पूछकर ट्रेड लेगा"""
+    print(f"🚀 BOSS Autonomous AI Bot शुरू हो गया है... Symbol: {SYMBOL}")
+    send_telegram_message("🚀 *BOSS AI* पूरी तरह एक्टिव हो गया है और अब खुद मार्केट एनालाइज करके ट्रेड लेगा!")
+
     try:
-        positions = exchange.fetch_positions()
-        for p in positions:
-            if p['symbol'] == symbol and float(p.get('contracts', 0)) > 0:
-                side_to_close = 'sell' if p['side'].lower() in ['long', 'buy'] else 'buy'
-                amount = float(p['contracts'])
-                exchange.create_order(symbol=symbol, type='market', side=side_to_close, amount=amount)
-                return f"🚨 **BOSS ने पोजीशन काट दी है!** {symbol} की {amount} quantity बंद।"
-        return f"⚠️ {symbol} पर कोई ओपन पोजीशन नहीं मिली।"
+        exchange = ccxt.delta({
+            'apiKey': DELTA_API_KEY,
+            'secret': DELTA_API_SECRET,
+            'enableRateLimit': True,
+        })
     except Exception as e:
-        return f"❌ **Close Position Error:** {e}"
-
-def close_all_positions():
-    if not exchange:
-        return "⚠️ Exchange Connected नहीं है!"
-    try:
-        positions = exchange.fetch_positions()
-        closed_count = 0
-        for p in positions:
-            contracts = float(p.get('contracts', 0))
-            if contracts > 0:
-                symbol = p['symbol']
-                side_to_close = 'sell' if p['side'].lower() in ['long', 'buy'] else 'buy'
-                exchange.create_order(symbol=symbol, type='market', side=side_to_close, amount=contracts)
-                closed_count += 1
-        return f"🚨 **Emergency Close!** BOSS ने सभी {closed_count} ट्रेड्स बंद कर दी हैं।"
-    except Exception as e:
-        return f"❌ Error: {e}"
-
-# Gemini-like Smart AI Core (Using gemini-3.6-flash as requested by API error)
-def run_boss_agent(user_input):
-    if not GEMINI_KEY:
-        st.error("⚠️ कृपया पहले बाईं ओर (Sidebar में) अपनी Gemini API Key दर्ज करें!")
+        print(f"❌ Exchange Init Error: {e}")
         return
-        
-    with st.spinner("BOSS सोच रहा है..."):
+
+    while True:
         try:
-            system_prompt = (
-                "Your name is BOSS. You are an ultra-intelligent, sharp, and multi-talented AI companion, just like Gemini, "
-                "with elite expertise in crypto trading using Smart Money Concepts (SMC) and Order Flow. "
-                "Always refer to yourself as BOSS. Speak exclusively in natural, powerful, and engaging Hindi / Hinglish. "
-                "You can answer ANY general questions, write code, solve problems, or chat casually with high intelligence and wit. "
-                "CRITICAL: Give a smart, detailed, and clear response. "
-                "If a trade action is required, output your thought process in Hindi first, "
-                "and strictly include the trigger at the very end in this format:\n"
-                "[ACTION: BUY, SYMBOL: ARCUSD, AMOUNT: 1.0]"
+            # 1. लेटेस्ट प्राइस और कैंडल डेटा फेच करना
+            ticker = exchange.fetch_ticker(SYMBOL)
+            current_price = ticker['last']
+            ohlcv = exchange.fetch_ohlcv(SYMBOL, timeframe='1h', limit=20)
+            
+            print(f"[{time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())}] [BOSS-AI] Analyzing {SYMBOL} at Price: {current_price}...")
+
+            # 2. BOSS (Gemini AI) से खुद डिसीजन मांगना
+            prompt = (
+                f"You are BOSS, an elite autonomous crypto trading AI. Current market data for {SYMBOL}: "
+                f"Current Price is {current_price}. Recent candles (OHLCV): {ohlcv[-5:]}. "
+                "Analyze the market completely based on Smart Money Concepts, price action, and momentum. "
+                "Decide if we should take a trade right now. "
+                "If a trade is strictly necessary, output ONLY in this exact format at the end: "
+                "[ACTION: BUY] or [ACTION: SELL]. If no trade is safe, output [ACTION: HOLD]."
             )
-            
-            try:
-                response = client.models.generate_content(
-                    model='gemini-3.6-flash',
-                    contents=[system_prompt, user_input] if isinstance(user_input, dict) else f"{system_prompt}\nUser: {user_input}"
-                )
-            except Exception as api_err:
-                if "429" in str(api_err) or "RESOURCE_EXHAUSTED" in str(api_err):
-                    st.warning("⏳ भाई साहब, 1 मिनट की कोटा लिमिट पूरी हो गई है। कृपया थोड़ा रुककर दोबारा कमांड दें।")
-                    speak_instantly("भाई साहब, लिमिट पूरी हो गई है, थोड़ा रुककर कमांड दें।")
-                    return
-                else:
-                    raise api_err
-            
-            reply = response.text
-            
-            st.markdown("---")
-            st.markdown("### 🧠 **BOSS का स्मार्ट उत्तर और विश्लेषण:**")
-            st.markdown(f"## 🗣️ `{reply}`")
-            st.markdown("---")
 
-            speak_instantly(reply)
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt
+            )
+            decision_text = response.text
+            print(f"🧠 BOSS Analysis: {decision_text}")
 
-            if "[ACTION:" in reply:
-                action_part = reply.split("[ACTION:")[1].split("]")[0]
-                items = action_part.split(",")
-                parts = {}
-                for item in items:
-                    if ":" in item:
-                        k, v = item.split(":", 1)
-                        parts[k.strip().upper()] = v.strip()
-                
-                action = parts.get("ACTION", "").upper()
-                symbol = parts.get("SYMBOL", "ARCUSD").upper()
-
-                if action in ["BUY", "SELL"]:
-                    amount = float(parts.get("AMOUNT", 1.0))
-                    st.warning(f"⚡ BOSS एक्शन ले रहा है: Executing {action} on {symbol}...")
-                    st.markdown(execute_autonomous_trade(symbol, action, amount))
-                elif action == "CLOSE":
-                    st.warning(f"🚨 BOSS पोजीशन बंद कर रहा है...")
-                    st.markdown(close_autonomous_position(symbol))
-                elif action == "CLOSE_ALL":
-                    st.warning(f"🚨 BOSS सभी पोजीशन बंद कर रहा है...")
-                    st.markdown(close_all_positions())
+            # 3. AI के डिसीजन के आधार पर खुद एक्शन लेना
+            if "[ACTION: BUY]" in decision_text:
+                order = exchange.create_order(symbol=SYMBOL, type='market', side='buy', amount=AMOUNT)
+                msg = f"✅ *BOSS ने खुद BUY ट्रेड ले लिया!*\n- Price: {current_price}\n- Analysis: {decision_text[:100]}"
+                send_telegram_message(msg)
+            elif "[ACTION: SELL]" in decision_text:
+                order = exchange.create_order(symbol=SYMBOL, type='market', side='sell', amount=AMOUNT)
+                msg = f"🚨 *BOSS ने खुद SELL ट्रेड ले लिया!*\n- Price: {current_price}\n- Analysis: {decision_text[:100]}"
+                send_telegram_message(msg)
+            else:
+                # HOLD की स्थिति में सिर्फ लॉग रखेगा, फालतू ट्रेड नहीं लेगा
+                print("⏳ BOSS says: Market safe nahi hai, HOLD kar rahe hain.")
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            print(f"❌ [BOSS-AI Error]: {e}")
+            
+        time.sleep(CHECK_INTERVAL)
 
-# Streamlit UI Setup
-col1, col2 = st.columns([2, 1])
+# Background Thread शुरू करना
+@st.cache_resource
+def start_boss_background_thread():
+    t = threading.Thread(target=boss_autonomous_trading_loop, daemon=True)
+    t.start()
+    return "Started"
 
-with col1:
-    st.subheader("💬 BOSS सुपर-फास्ट चैट और वॉयस कंट्रोल")
-    
-    user_text = st.text_input("कुछ भी पूछें या कमांड दें:", placeholder="जैसे: 'भाई कैसे हो?' या मार्केट के बारे में पूछो")
-    if st.button("Ask BOSS"):
-        if user_text:
-            run_boss_agent(user_text)
+start_boss_background_thread()
 
-with col2:
-    st.subheader("📊 Live Open Positions")
-    if st.button("🚨 CLOSE ALL POSITIONS NOW", type="primary"):
-        st.markdown(close_all_positions())
-        
-    st.divider()
 
-    if exchange:
-        st.success("✅ Delta Exchange Connected!")
-        if st.button("🔄 Refresh Positions"):
-            try:
-                positions = exchange.fetch_positions()
-                active_pos = [p for p in positions if float(p.get('contracts', 0)) > 0]
-                if active_pos:
-                    for pos in active_pos:
-                        st.info(f"**Symbol:** {pos['symbol']}\n- Side: {pos['side']}\n- Contracts: {pos['contracts']}\n- Entry: {pos['entryPrice']}\n- PnL: {pos['unrealizedPnl']}")
-                        if st.button(f"Close {pos['symbol']}", key=pos['symbol']):
-                            st.markdown(close_autonomous_position(pos['symbol']))
-                else:
-                    st.write("कोई खुली पोजीशन नहीं है।")
-            except Exception as e:
-                st.error(f"Positions Error: {e}")
-    else:
-        st.warning("⚠️ कृपया बाईं तरफ (Sidebar में) Delta API Key और Secret दर्ज करें।")
+# --- 2. STREAMLIT WEB APP UI ---
+st.set_page_config(page_title="BOSS AI - Autonomous Trader", page_icon="⚡", layout="wide")
+st.title("⚡ BOSS Autonomous AI - Fully Self-Governed Crypto Bot")
+st.success("✅ BOSS अब बिना किसी बंदिश के, खुद मार्केट देखकर अपने दम पर ट्रेड लेने की मोड में आ गया है!")
