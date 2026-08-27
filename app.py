@@ -20,7 +20,7 @@ CHECK_INTERVAL = 60
 
 client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# --- SESSION STATE FOR CONTROLS & METRICS ---
+# --- STREAMLIT SESSION STATE SETUP ---
 if 'bot_running' not in st.session_state:
     st.session_state.bot_running = False
 if 'bot_status' not in st.session_state:
@@ -46,11 +46,12 @@ def send_telegram_message(message):
         payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
         requests.post(url, json=payload)
     except Exception as e:
-        print(f"❌ Telegram Error: {e}")
+        print(f"Telegram Error: {e}")
 
 def boss_autonomous_trading_loop():
-    print("🚀 BOSS Background Worker Thread Initialized.")
+    print("BOSS Background Loop Started.")
     
+    # Safe Exchange Initialization inside loop to prevent immediate startup crash
     try:
         exchange = ccxt.delta({
             'apiKey': DELTA_API_KEY,
@@ -58,15 +59,18 @@ def boss_autonomous_trading_loop():
             'enableRateLimit': True,
         })
     except Exception as e:
-        print(f"❌ Exchange Init Error: {e}")
-        return
+        print(f"Exchange Init Error: {e}")
+        exchange = None
 
     while True:
-        if st.session_state.bot_running:
+        if st.session_state.bot_running and exchange:
             try:
-                # 1. Fetch Balance
-                balance = exchange.fetch_balance()
-                st.session_state.account_balance = balance.get('USDT', {}).get('free', 0.0)
+                # 1. Fetch Balance safely
+                try:
+                    balance = exchange.fetch_balance()
+                    st.session_state.account_balance = balance.get('USDT', {}).get('free', 0.0)
+                except Exception:
+                    pass
 
                 # 2. Market Ticker & Price
                 st.session_state.bot_status = "Scanning Market..."
@@ -74,7 +78,7 @@ def boss_autonomous_trading_loop():
                 current_price = ticker['last']
                 st.session_state.last_price = current_price
                 
-                # 3. Fetch Positions / PnL
+                # 3. Fetch Positions / PnL safely
                 try:
                     positions = exchange.fetch_positions([SYMBOL])
                     if positions:
@@ -118,7 +122,7 @@ def boss_autonomous_trading_loop():
             except Exception as e:
                 st.session_state.bot_status = f"Error: {e}"
         else:
-            st.session_state.bot_status = "Paused (Manual Stop)"
+            st.session_state.bot_status = "Stopped (Manual Mode)"
             
         time.sleep(CHECK_INTERVAL)
 
@@ -142,12 +146,10 @@ col_btn1, col_btn2, col_status = st.columns([1, 1, 2])
 with col_btn1:
     if st.button("▶️ START BOSS", type="primary"):
         st.session_state.bot_running = True
-        st.success("BOSS Started!")
 
 with col_btn2:
     if st.button("⏹️ STOP BOSS", type="secondary"):
         st.session_state.bot_running = False
-        st.warning("BOSS Stopped!")
 
 with col_status:
     st.info(f"**Current Status:** {st.session_state.bot_status}")
