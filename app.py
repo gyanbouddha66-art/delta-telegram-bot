@@ -2,27 +2,37 @@ import os
 import streamlit as st
 import ccxt
 from google import genai
-from audio_recorder_streamlit import audio_recorder
 import streamlit.components.v1 as components
 
 # Page Config
-st.set_page_config(page_title="BOSS AI - Ultra Fast Gemini Style", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="BOSS AI - Smart & Fast", page_icon="⚡", layout="wide")
 st.title("⚡ BOSS Smart AI - Super Fast Real-Time Assistant")
 
-# 1. API Keys Setup
-GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
-DELTA_KEY = os.environ.get("DELTA_API_KEY", "")
-DELTA_SECRET = os.environ.get("DELTA_API_SECRET", "")
+# --- SIDEBAR FOR SECURE API KEYS INPUT ---
+st.sidebar.header("🔑 API Keys Setup")
+st.sidebar.write("डैशबोर्ड की जरूरत नहीं, यहाँ अपनी चाबियाँ दर्ज करें:")
+
+input_gemini_key = st.sidebar.text_input("Gemini API Key", type="password", value=os.environ.get("GEMINI_API_KEY", ""))
+input_delta_key = st.sidebar.text_input("Delta API Key", type="password", value=os.environ.get("DELTA_API_KEY", ""))
+input_delta_secret = st.sidebar.text_input("Delta API Secret", type="password", value=os.environ.get("DELTA_API_SECRET", ""))
+
+# Use input keys or fallback to environment/secrets
+GEMINI_KEY = input_gemini_key or st.secrets.get("GEMINI_API_KEY", "")
+DELTA_KEY = input_delta_key or st.secrets.get("DELTA_API_KEY", "")
+DELTA_SECRET = input_delta_secret or st.secrets.get("DELTA_API_SECRET", "")
 
 client = genai.Client(api_key=GEMINI_KEY) if GEMINI_KEY else None
 
 def get_delta_exchange():
     if DELTA_KEY and DELTA_SECRET:
-        return ccxt.delta({
-            'apiKey': DELTA_KEY,
-            'secret': DELTA_SECRET,
-            'enableRateLimit': True,
-        })
+        try:
+            return ccxt.delta({
+                'apiKey': DELTA_KEY,
+                'secret': DELTA_SECRET,
+                'enableRateLimit': True,
+            })
+        except Exception:
+            return None
     return None
 
 exchange = get_delta_exchange()
@@ -32,14 +42,13 @@ def speak_instantly(text):
     clean_text = text.split("[ACTION:")[0].strip() if "[ACTION:" in text else text
     clean_text = clean_text.replace("*", "").replace("#", "").replace("`", "").replace('"', '').replace("'", "")
     
-    # JavaScript to make the browser speak instantly without downloading files
     js_code = f"""
     <script>
         if ('speechSynthesis' in window) {{
-            window.speechSynthesis.cancel(); // Stop previous speech
+            window.speechSynthesis.cancel();
             let utterance = new SpeechSynthesisUtterance("{clean_text}");
-            utterance.lang = 'hi-IN'; // Hindi voice
-            utterance.rate = 1.0; // Normal fast speed
+            utterance.lang = 'hi-IN';
+            utterance.rate = 1.0;
             window.speechSynthesis.speak(utterance);
         }}
     </script>
@@ -49,7 +58,7 @@ def speak_instantly(text):
 # Autonomous Trade Execution
 def execute_autonomous_trade(symbol, side, amount):
     if not exchange:
-        return "⚠️ Delta Exchange API Key / Secret missing!"
+        return "⚠️ Delta Exchange API Key / Secret सही से दर्ज नहीं हैं!"
     try:
         order = exchange.create_order(symbol=symbol, type='market', side=side.lower(), amount=amount)
         price = float(order.get('price') or exchange.fetch_ticker(symbol)['last'])
@@ -91,26 +100,26 @@ def close_all_positions():
 
 # Gemini-like Smart AI Core
 def run_boss_agent(user_input):
+    if not GEMINI_KEY:
+        st.error("⚠️ कृपया पहले बाईं ओर (Sidebar में) अपनी Gemini API Key दर्ज करें!")
+        return
+        
     with st.spinner("BOSS सोच रहा है..."):
         try:
             system_prompt = (
                 "Your name is BOSS. You are an ultra-intelligent, sharp, and multi-talented AI companion, just like Gemini, "
                 "with elite expertise in crypto trading using Smart Money Concepts (SMC) and Order Flow. "
                 "Always refer to yourself as BOSS. Speak exclusively in natural, powerful, and engaging Hindi / Hinglish. "
-                "You can answer ANY general questions, write code, solve problems, or chat casually with high intelligence and wit, "
-                "just like Gemini. When it comes to trading, analyze the live market deeply like a big player, "
-                "and manage entries/exits dynamically without fixed TP/SL. "
+                "You can answer ANY general questions, write code, solve problems, or chat casually with high intelligence and wit. "
                 "CRITICAL: Give a smart, detailed, and clear response. "
                 "If a trade action is required, output your thought process in Hindi first, "
                 "and strictly include the trigger at the very end in this format:\n"
-                "[ACTION: BUY, SYMBOL: ARCUSD, AMOUNT: 1.0]\n"
-                "Or for selling: [ACTION: SELL, SYMBOL: ARCUSD, AMOUNT: 1.0]\n"
-                "Or for exiting: [ACTION: CLOSE, SYMBOL: ARCUSD] or [ACTION: CLOSE_ALL]"
+                "[ACTION: BUY, SYMBOL: ARCUSD, AMOUNT: 1.0]"
             )
             
             try:
                 response = client.models.generate_content(
-                    model='gemini-3.6-flash',
+                    model='gemini-2.5-flash',
                     contents=[system_prompt, user_input] if isinstance(user_input, dict) else f"{system_prompt}\nUser: {user_input}"
                 )
             except Exception as api_err:
@@ -123,16 +132,13 @@ def run_boss_agent(user_input):
             
             reply = response.text
             
-            # Big Bold UI Display
             st.markdown("---")
             st.markdown("### 🧠 **BOSS का स्मार्ट उत्तर और विश्लेषण:**")
             st.markdown(f"## 🗣️ `{reply}`")
             st.markdown("---")
 
-            # Instant Gemini-Style Speech
             speak_instantly(reply)
 
-            # Safe Action Parsing
             if "[ACTION:" in reply:
                 action_part = reply.split("[ACTION:")[1].split("]")[0]
                 items = action_part.split(",")
@@ -165,8 +171,7 @@ col1, col2 = st.columns([2, 1])
 with col1:
     st.subheader("💬 BOSS सुपर-फास्ट चैट और वॉयस कंट्रोल")
     
-    # Text input is always instant and best for lightning-fast Gemini-like chat
-    user_text = st.text_input("कुछ भी पूछें या कमांड दें:", placeholder="जैसे: 'भाई कैसे हो?', 'कोडिंग बताओ' या मार्केट के बारे में पूछो")
+    user_text = st.text_input("कुछ भी पूछें या कमांड दें:", placeholder="जैसे: 'भाई कैसे हो?' या मार्केट के बारे में पूछो")
     if st.button("Ask BOSS"):
         if user_text:
             run_boss_agent(user_text)
@@ -179,6 +184,7 @@ with col2:
     st.divider()
 
     if exchange:
+        st.success("✅ Delta Exchange Connected!")
         if st.button("🔄 Refresh Positions"):
             try:
                 positions = exchange.fetch_positions()
@@ -193,4 +199,4 @@ with col2:
             except Exception as e:
                 st.error(f"Positions Error: {e}")
     else:
-        st.warning("Delta API Connect नहीं है।")
+        st.warning("⚠️ कृपया बाईं तरफ (Sidebar में) Delta API Key और Secret दर्ज करें।")
