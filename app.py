@@ -10,13 +10,12 @@ st.title("⚡ BOSS Smart AI - Super Fast Real-Time Assistant")
 
 # --- SIDEBAR FOR SECURE API KEYS INPUT ---
 st.sidebar.header("🔑 API Keys Setup")
-st.sidebar.write("डैशबोर्ड की जरूरत नहीं, यहाँ अपनी चाबियाँ दर्ज करें:")
+st.sidebar.write("यहाँ अपनी चाबियाँ दर्ज करें:")
 
 input_gemini_key = st.sidebar.text_input("Gemini API Key", type="password", value=os.environ.get("GEMINI_API_KEY", ""))
 input_delta_key = st.sidebar.text_input("Delta API Key", type="password", value=os.environ.get("DELTA_API_KEY", ""))
 input_delta_secret = st.sidebar.text_input("Delta API Secret", type="password", value=os.environ.get("DELTA_API_SECRET", ""))
 
-# Use input keys or fallback to environment/secrets
 GEMINI_KEY = input_gemini_key or st.secrets.get("GEMINI_API_KEY", "")
 DELTA_KEY = input_delta_key or st.secrets.get("DELTA_API_KEY", "")
 DELTA_SECRET = input_delta_secret or st.secrets.get("DELTA_API_SECRET", "")
@@ -98,7 +97,7 @@ def close_all_positions():
     except Exception as e:
         return f"❌ Error: {e}"
 
-# Gemini-like Smart AI Core
+# Gemini-like Smart AI Core (Using gemini-3.6-flash as requested by API error)
 def run_boss_agent(user_input):
     if not GEMINI_KEY:
         st.error("⚠️ कृपया पहले बाईं ओर (Sidebar में) अपनी Gemini API Key दर्ज करें!")
@@ -119,7 +118,7 @@ def run_boss_agent(user_input):
             
             try:
                 response = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-3.6-flash',
                     contents=[system_prompt, user_input] if isinstance(user_input, dict) else f"{system_prompt}\nUser: {user_input}"
                 )
             except Exception as api_err:
