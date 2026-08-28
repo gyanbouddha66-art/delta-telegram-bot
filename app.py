@@ -24,12 +24,12 @@ bot_running = True
 last_analysis_log = "Initializing BOSS AI..."
 last_price_val = 0.0
 
-# Gemini Configuration (Standard Library Setup)
+# Correct Gemini SDK Setup
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    gemini_model = genai.GenerativeModel('gemini-1.5-flash')
 else:
-    model = None
+    gemini_model = None
 
 app = Flask(__name__)
 
@@ -91,8 +91,12 @@ def telegram_webhook():
             threading.Thread(target=send_voice_sync, args=(f"अभी कॉइन का भाव है {last_price_val} डॉलर और सिस्टम चालू है।",)).start()
         else:
             try:
-                response = model.generate_content(f"You are BOSS, an elite crypto trading AI. Reply shortly in Hindi/Hinglish to: '{text}'")
-                reply = response.text
+                if gemini_model:
+                    response = gemini_model.generate_content(f"You are BOSS, an elite crypto trading AI. Reply shortly in Hindi/Hinglish to: '{text}'")
+                    reply = response.text
+                else:
+                    reply = "AI model not initialized."
+                
                 send_telegram_message(f"🤖 *BOSS:* {reply}")
                 threading.Thread(target=send_voice_sync, args=(reply,)).start()
             except Exception as e:
@@ -132,21 +136,22 @@ def boss_autonomous_trading_loop():
                     "[ACTION: BUY] or [ACTION: SELL]. If safe, output [ACTION: HOLD]."
                 )
 
-                response = model.generate_content(prompt)
-                decision_text = response.text
-                last_analysis_log = decision_text
+                if gemini_model:
+                    response = gemini_model.generate_content(prompt)
+                    decision_text = response.text
+                    last_analysis_log = decision_text
 
-                if "[ACTION: BUY]" in decision_text:
-                    exchange.create_order(symbol=SYMBOL, type='market', side='buy', amount=AMOUNT)
-                    alert_txt = f"बधाई हो भाई! BOSS ने {current_price} डॉलर पर बाय ट्रेड ले लिया है।"
-                    send_telegram_message(f"✅ *BOSS BUY Trade Executed!*\n- Price: {current_price}\n- {decision_text}")
-                    threading.Thread(target=send_voice_sync, args=(alert_txt,)).start()
-                    
-                elif "[ACTION: SELL]" in decision_text:
-                    exchange.create_order(symbol=SYMBOL, type='market', side='sell', amount=AMOUNT)
-                    alert_txt = f"सावधान! BOSS ने {current_price} डॉलर पर सेल ट्रेड ले लिया है।"
-                    send_telegram_message(f"🚨 *BOSS SELL Trade Executed!*\n- Price: {current_price}\n- {decision_text}")
-                    threading.Thread(target=send_voice_sync, args=(alert_txt,)).start()
+                    if "[ACTION: BUY]" in decision_text:
+                        exchange.create_order(symbol=SYMBOL, type='market', side='buy', amount=AMOUNT)
+                        alert_txt = f"बधाई हो भाई! BOSS ने {current_price} डॉलर पर बाय ट्रेड ले लिया है।"
+                        send_telegram_message(f"✅ *BOSS BUY Trade Executed!*\n- Price: {current_price}\n- {decision_text}")
+                        threading.Thread(target=send_voice_sync, args=(alert_txt,)).start()
+                        
+                    elif "[ACTION: SELL]" in decision_text:
+                        exchange.create_order(symbol=SYMBOL, type='market', side='sell', amount=AMOUNT)
+                        alert_txt = f"सावधान! BOSS ने {current_price} डॉलर पर सेल ट्रेड ले लिया है।"
+                        send_telegram_message(f"🚨 *BOSS SELL Trade Executed!*\n- Price: {current_price}\n- {decision_text}")
+                        threading.Thread(target=send_voice_sync, args=(alert_txt,)).start()
                 
             except Exception as e:
                 print(f"❌ Loop Error: {e}")
