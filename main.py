@@ -241,7 +241,7 @@ def execute_real_order(exchange, symbol, decision):
                 print("SL Error:", e)
 
             last_trade_time = time.time()
-            daily_trades +=1
+            daily_trades += 1
 
             message = (
                 "🚨 GEMINI REAL BRACKET TRADE\n\n"
@@ -309,16 +309,14 @@ def trading_engine():
 
 def telegram_loop():
     global running
-    offset = None
+    offset = 0
     print("TELEGRAM CONTROL STARTED")
     while True:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
-            params = {"timeout": 30}
-            if offset is not None:
-                params["offset"] = offset
+            params = {"timeout": 20, "offset": offset}
 
-            response = requests.get(url, params=params, timeout=40)
+            response = requests.get(url, params=params, timeout=25)
             data = response.json()
 
             for update in data.get("result", []):
@@ -363,6 +361,7 @@ if __name__ == "__main__":
     print("GH BOSS GEMINI REAL-MONEY TRADER")
     print("=" * 60)
 
+    # Background Threads start
     threading.Thread(target=trading_engine, daemon=True).start()
     threading.Thread(target=telegram_loop, daemon=True).start()
 
