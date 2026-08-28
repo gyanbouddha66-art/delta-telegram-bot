@@ -11,7 +11,7 @@ import edge_tts
 TELEGRAM_BOT_TOKEN = "8919168139:AAFijo1uf4BoJo1oJjqKvO9UjYj96wASpw8"  
 TELEGRAM_CHAT_ID = "965643127"              
 
-# सीधी असली की यहाँ फिक्स कर दी गई है
+# आपकी वही वाली की यहाँ सेट है
 GEMINI_API_KEY = "AQ.Ab8RN6LBu4eJ5cldWMqexslIbvZ2Wc3aKnMlclgM-wuoOF2mFg"
 DELTA_API_KEY = "nHv2Al08t6Bd8O1KSGBXCHP2ZbpmP3"
 DELTA_API_SECRET = "tCTPHxKcZxZ2wvk9oMyFrgDRkTK37ryjRNDM6Lhkt6neE2MfIkv9lL5vW8se"
@@ -34,23 +34,40 @@ def send_telegram_message(text):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-# **सीधे HTTP API के जरिए बिना किसी झंझट के Gemini से बात करने का फंक्शन**
+# **Google Cloud / Vertex AI टाइप कीज़ के लिए सही ऑथेंटिकेशन हेडर वाला फंक्शन**
 def ask_gemini(prompt_text):
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-        headers = {'Content-Type': 'application/json'}
+        # Vertex AI / Generative Language API Endpoint with Bearer Token format if it's an OAuth token
+        url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+        
+        # यदि यह Bearer टोकन है या API Key है, दोनों के लिए हेडर सेट कर रहे हैं
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {GEMINI_API_KEY}'
+        }
+        
         data = {
             "contents": [{
                 "parts": [{"text": prompt_text}]
             }]
         }
+        
         response = requests.post(url, headers=headers, json=data)
         res_json = response.json()
         
         if "candidates" in res_json:
             return res_json["candidates"][0]["content"]["parts"][0]["text"]
         else:
-            return f"API Error: {res_json.get('error', {}).get('message', 'Unknown error')}"
+            # अगर Bearer से न चले तो अल्टरनेटिव की क्वेरी पैरामीटर ट्रिगर करेंगे
+            url_fallback = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+            resp_fallback = requests.post(url_fallback, headers={'Content-Type': 'application/json'}, json=data)
+            res_fallback_json = resp_fallback.json()
+            
+            if "candidates" in res_fallback_json:
+                return res_fallback_json["candidates"][0]["content"]["parts"][0]["text"]
+            else:
+                err_msg = res_fallback_json.get('error', {}).get('message', str(res_fallback_json))
+                return f"API Error: {err_msg}"
     except Exception as e:
         return f"Request Error: {e}"
 
