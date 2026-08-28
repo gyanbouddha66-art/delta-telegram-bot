@@ -1,5 +1,6 @@
 flask
 requests
 ccxt
-google-generativeai
+google-genai
+pydantic
 edge-tts
