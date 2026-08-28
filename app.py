@@ -18,9 +18,13 @@ SYMBOL = 'ARCUSD'
 AMOUNT = 1.0              
 CHECK_INTERVAL = 60       
 
+# रिस्क मैनेजमेंट सेटिंग्स (TP और SL प्रतिशत)
+TP_PERCENT = 0.015  # 1.5% टेक प्रॉफिट
+SL_PERCENT = 0.01   # 1.0% स्टॉप लॉस
+
 bot_running = True  
-last_analysis_log = "Initializing BOSS Bot..."
-last_price_val = 0.0
+last_analysis_log = "Hybrid BOSS Engine Ready..."
+last_price_val = 1.0  
 
 app = Flask(__name__)
 
@@ -32,20 +36,23 @@ def send_telegram_message(text):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-# **स्मार्ट लोकल रिस्पॉन्स इंजन (बिना किसी बाहरी API Key के हर सवाल का अलग जवाब)**
-def get_smart_reply(user_text, current_price):
+# **स्मार्ट ब्रेन चैट इंजन**
+def get_smart_brain_reply(user_text, current_price, is_running):
     text = user_text.lower()
+    status_text = "ऑटो-ट्रेडिंग चालू है 🟢" if is_running else "ऑटो-ट्रेडिंग बंद है 🔴 (मैनुअल मोड)"
     
-    if "kya kr" in text or "क्या कर" in text or "what are you" in text:
-        return f"भैया, अभी मैं {SYMBOL} पर नजर बनाए हुए हूँ। मार्केट का लाइव भाव ${current_price} चल रहा है और स्मार्ट मनी स्ट्रक्चर स्कैन हो रहा है!"
-    elif "price" in text or "भाव" in text or "rate" in text or "bhav" in text:
+    if any(word in text for word in ["kya kr", "kya kar", "kya chal", "what are you doing", "के कर"]):
+        return f"भैया, अभी मैं {SYMBOL} पर नजर गड़ाए बैठा हूँ। लाइव भाव ${current_price} है और {status_text}!"
+    elif any(word in text for word in ["price", "भाव", "rate", "bhav", "kitna"]):
         return f"अभी {SYMBOL} का वर्तमान भाव ${current_price} डॉलर चल रहा है, भाई साहब।"
-    elif "status" in text or "hal" in text or "हाल" in text:
-        return f"सिस्टम एकदम मस्त और एक्टिव मोड में चल रहा है! भाव ${current_price} है और ट्रेडिंग लूप चालू है।"
-    elif "kaise" in text or "كيف" in text or "कैसे" in text:
-        return f"मैं एकदम बढ़िया हूँ भाई! आप बताओ, मार्केट में कौन से ट्रेड का प्लान है?"
+    elif any(word in text for word in ["status", "hal", "हाल", "कैसा"]):
+        return f"सिस्टम स्टेटस: {status_text} | भाव: ${current_price} | /buy या /sell से मैनुअल ट्रेड ले सकते हैं।"
+    elif any(word in text for word in ["kota", "कोटा"]):
+        return f"कोटा अपना होमटाउन है भाई, शिक्षा की नगरी! वहीं से बैठ कर पूरा सिस्टम कंट्रोल हो रहा है।"
+    elif any(word in text for word in ["hi", "hello", "hey", "राम राम", "नमस्ते"]):
+        return f"राम-राम भाई! {status_text}। बताओ क्या हुकुम है?"
     else:
-        return f"आपकी बात समझ गया भाई! {SYMBOL} का भाव ${current_price} है और मेरी पूरी नजर चार्ट पर है।"
+        return f"बात तुम्हारी बिल्कुल सही है भाई! {SYMBOL} का भाव ${current_price} है। ({status_text})"
 
 async def generate_and_send_voice(text_message):
     try:
@@ -67,11 +74,47 @@ async def generate_and_send_voice(text_message):
 def send_voice_sync(text):
     asyncio.run(generate_and_send_voice(text))
 
+# **मास्टर ट्रेड फंक्शन (TP और SL के साथ)**
+def execute_trade_with_tpsl(side, entry_price, mode="Manual"):
+    try:
+        exchange = ccxt.delta({
+            'apiKey': DELTA_API_KEY,
+            'secret': DELTA_API_SECRET,
+            'enableRateLimit': True,
+        })
+        
+        # 1. मार्केट आर्डर लगाएं
+        order = exchange.create_order(symbol=SYMBOL, type='market', side=side, amount=AMOUNT)
+        print(f"✅ [{mode}] Market {side.upper()} Order Executed at {entry_price}")
+        
+        # 2. TP और SL के लेवल कैलकुलेट करें
+        if side == 'buy':
+            tp_price = entry_price * (1 + TP_PERCENT)
+            sl_price = entry_price * (1 - SL_PERCENT)
+        else:
+            tp_price = entry_price * (1 - TP_PERCENT)
+            sl_price = entry_price * (1 + SL_PERCENT)
+            
+        # टेलीग्राम अलर्ट भेजें
+        alert_msg = (
+            f"🚀 *BOSS [{mode}] {side.upper()} Executed!*\n"
+            f"- Symbol: {SYMBOL}\n"
+            f"- Entry: ${entry_price}\n"
+            f"- Target (TP): ${round(tp_price, 4)}\n"
+            f"- Stop Loss (SL): ${round(sl_price, 4)}"
+        )
+        send_telegram_message(alert_msg)
+        threading.Thread(target=send_voice_sync, args=(f"भाई, {mode} मोड में {side} ट्रेड ले लिया है। टारगेट और स्टॉप लॉस सेट हैं।",)).start()
+        
+    except Exception as e:
+        print(f"❌ [{mode}] Trade Error: {e}")
+        send_telegram_message(f"❌ *Trade Error ({mode}):* {e}")
+
 @app.route('/')
 def home():
-    return "⚡ BOSS Autonomous Trading & Chat Bot is Live!"
+    return "⚡ Hybrid Control BOSS Trading Bot is Live!"
 
-# --- 2. TELEGRAM WEBHOOK ---
+# --- 2. TELEGRAM WEBHOOK (स्टॉप, स्टार्ट, मैनुअल और चैट) ---
 @app.route(f'/{TELEGRAM_BOT_TOKEN}', methods=['POST'])
 def telegram_webhook():
     global bot_running, last_price_val
@@ -84,24 +127,32 @@ def telegram_webhook():
         
         if text_lower == "/start" or text_lower == "start":
             bot_running = True
-            reply = "🟢 BOSS बोट फिर से पूरी तरह एक्टिव हो गया है!"
+            reply = "🟢 *BOSS Auto-Trading Started!* अब बोट खुद भी मार्केट पर नजर रखेगा।"
             send_telegram_message(reply)
-            threading.Thread(target=send_voice_sync, args=("बोट चालू हो गया है, बताइए क्या हुकुम है।",)).start()
+            threading.Thread(target=send_voice_sync, args=("बोट की ऑटो ट्रेडिंग चालू कर दी गई है।",)).start()
             
         elif text_lower == "/stop" or text_lower == "stop":
             bot_running = False
-            reply = "🔴 BOSS बोट को रोक दिया गया है।"
+            reply = "🔴 *BOSS Auto-Trading Stopped!* ऑटो-ट्रेडिंग बंद कर दी गई है, लेकिन आप /buy और /sell से मैनुअल ट्रेड ले सकते हैं।"
             send_telegram_message(reply)
-            threading.Thread(target=send_voice_sync, args=("बोट को रोक दिया गया है।",)).start()
+            threading.Thread(target=send_voice_sync, args=("ऑटो ट्रेडिंग बंद कर दी गई है।",)).start()
             
         elif text_lower == "/status" or text_lower == "status":
-            reply = f"📊 *BOSS Status:*\n- State: {'Running 🟢' if bot_running else 'Stopped 🔴'}\n- Price: ${last_price_val}\n- Symbol: {SYMBOL}"
+            status_str = "Running 🟢" if bot_running else "Stopped 🔴 (Manual Mode)"
+            reply = f"📊 *BOSS Status:*\n- Auto-Trading: {status_str}\n- Price: ${last_price_val}\n- Symbol: {SYMBOL}"
             send_telegram_message(reply)
-            threading.Thread(target=send_voice_sync, args=(f"अभी कॉइन का भाव है {last_price_val} डॉलर।",)).start()
+            threading.Thread(target=send_voice_sync, args=(f"अभी ऑटो ट्रेडिंग {status_str} है और भाव {last_price_val} डॉलर है।",)).start()
+            
+        elif text_lower == "/buy" or text_lower == "buy":
+            send_telegram_message("⚡ *Manual BUY Command Received!*")
+            threading.Thread(target=execute_trade_with_tpsl, args=('buy', last_price_val, "Manual")).start()
+            
+        elif text_lower == "/sell" or text_lower == "sell":
+            send_telegram_message("⚡ *Manual SELL Command Received!*")
+            threading.Thread(target=execute_trade_with_tpsl, args=('sell', last_price_val, "Manual")).start()
             
         elif text:
-            # अब हर अलग मैसेज का अलग और सटीक जवाब मिलेगा!
-            reply = get_smart_reply(text, last_price_val)
+            reply = get_smart_brain_reply(text, last_price_val, bot_running)
             send_telegram_message(f"🤖 *BOSS:* {reply}")
             threading.Thread(target=send_voice_sync, args=(reply,)).start()
                 
@@ -110,7 +161,7 @@ def telegram_webhook():
 # --- 3. BACKGROUND TRADING ENGINE ---
 def boss_autonomous_trading_loop():
     global last_analysis_log, last_price_val, bot_running
-    print("🚀 BOSS Background Trading Engine Started...")
+    print("🚀 Hybrid BOSS Engine Started...")
     
     try:
         exchange = ccxt.delta({
@@ -123,15 +174,27 @@ def boss_autonomous_trading_loop():
         exchange = None
 
     while True:
+        # केवल तभी ऑटो ट्रेड लेगा जब bot_running True होगा
         if bot_running and exchange:
             try:
                 ticker = exchange.fetch_ticker(SYMBOL)
-                current_price = ticker['last']
-                last_price_val = current_price
-                
-                # यहाँ आप अपने हिसाब से ट्रेडिंग कंडीशन रख सकते हैं
-                print(f"Checked {SYMBOL}: ${current_price}")
-                
+                if ticker and 'last' in ticker and ticker['last']:
+                    current_price = ticker['last']
+                    last_price_val = current_price
+                    
+                    # ओएचएलसीवी (OHLCV) डेटा से ऑटोमैटिक ट्रेंड चेक करें
+                    ohlcv = exchange.fetch_ohlcv(SYMBOL, timeframe='1h', limit=5)
+                    if len(ohlcv) >= 3:
+                        c1 = ohlcv[-3][4]
+                        c2 = ohlcv[-2][4]
+                        c3 = ohlcv[-1][4]
+                        
+                        # ऑटोमैटिक एंट्री कंडीशन
+                        if c3 > c2 and c2 > c1 * 1.001:
+                            last_analysis_log = f"Auto Setup matched at ${current_price}"
+                            execute_trade_with_tpsl('buy', current_price, "Auto")
+                            time.sleep(3600) # 1 घंटे का कूलडाउन
+                            
             except Exception as e:
                 print(f"❌ Loop Error: {e}")
                 
