@@ -8,6 +8,7 @@ import ccxt
 from flask import Flask, request
 from google import genai
 from pydantic import BaseModel, Field
+from gtts import gTTS
 
 # ============================================================
 # CONFIG
@@ -78,6 +79,27 @@ def telegram(text, chat_id=None):
     except Exception as e:
         print("Telegram Error:", e)
 
+def telegram_voice(text, chat_id=None):
+    target_chat = chat_id or TELEGRAM_CHAT_ID
+    if not TELEGRAM_BOT_TOKEN or not target_chat:
+        return
+    try:
+        # Convert text to speech (Hindi/Hinglish)
+        tts = gTTS(text=text, lang='hi', slow=False)
+        voice_path = "response.ogg"
+        tts.save(voice_path)
+
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVoice"
+        with open(voice_path, "rb") as voice_file:
+            requests.post(url, data={"chat_id": target_chat}, files={"voice": voice_file}, timeout=30)
+        
+        if os.path.exists(voice_path):
+            os.remove(voice_path)
+    except Exception as e:
+        print("Voice Error:", e)
+        # Fallback to text if voice fails
+        telegram(text, chat_id)
+
 def create_exchange():
     exchange = ccxt.delta({
         "apiKey": DELTA_API_KEY,
@@ -145,6 +167,25 @@ Return ONLY JSON matching the schema.
     )
     return TradeDecision.model_validate_json(response.text)
 
+def chat_with_gemini(user_message):
+    if not gemini:
+        return "Gemini client not initialized."
+    try:
+        prompt = f"""
+You are GH BOSS, an intelligent, friendly, and smart AI companion and trading partner to your user (address him respectfully like 'भाई साहब'). 
+The user is talking to you on Telegram. Respond concisely (suitable for a voice note) in a smart, warm, helpful, and natural conversational tone (in Hinglish/Hindi). Keep it relatively brief so the audio note isn't too long.
+
+User message: {user_message}
+"""
+        response = gemini.models.generate_content(
+            model=MODEL,
+            contents=prompt
+        )
+        return response.text
+    except Exception as e:
+        print("Chat Error:", e)
+        return "भाई साहब, अभी दिमाग थोड़ा बिजी है, बाद में बात करते हैं!"
+
 def trading_engine():
     global last_price, last_decision, last_confidence, last_reason, last_entry, last_sl, last_tp
     print("🧠 GEMINI AUTONOMOUS ENGINE STARTED")
@@ -191,22 +232,24 @@ def webhook():
         data = request.get_json()
         if "message" in data:
             msg = data["message"]
-            text = msg.get("text", "").strip().lower()
+            text = msg.get("text", "").strip()
+            text_lower = text.lower()
             chat_id = msg["chat"]["id"]
 
             if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
                 print("Unauthorized Telegram chat:", chat_id)
                 return "OK", 200
 
-            if text in ["/start", "start"]:
+            # Commands Handling
+            if text_lower in ["/start", "start"]:
                 running = True
                 telegram("🟢 GEMINI REAL TRADING ON", chat_id)
 
-            elif text in ["/stop", "stop"]:
+            elif text_lower in ["/stop", "stop"]:
                 running = False
                 telegram("🔴 GEMINI AUTOTRADING OFF", chat_id)
 
-            elif text in ["/status", "status"]:
+            elif text_lower in ["/status", "status"]:
                 status_text = (
                     "📊 GH BOSS STATUS\n\n"
                     f"Trading: {'ON 🟢' if running else 'OFF 🔴'}\n"
@@ -221,7 +264,7 @@ def webhook():
                 )
                 telegram(status_text, chat_id)
 
-            elif text in ["/analysis", "analysis"]:
+            elif text_lower in ["/analysis", "analysis"]:
                 analysis_text = (
                     "🧠 GEMINI ANALYSIS\n\n"
                     f"Decision: {last_decision}\n\n"
@@ -231,24 +274,27 @@ def webhook():
                 )
                 telegram(analysis_text, chat_id)
 
-            elif text in ["/kill", "kill"]:
+            elif text_lower in ["/kill", "kill"]:
                 running = False
                 telegram("🛑 EMERGENCY KILL\nNew trades stopped.", chat_id)
 
-            elif text in ["/help", "help"]:
+            elif text_lower in ["/help", "help"]:
                 help_text = (
-                    "🤖 GH BOSS COMMANDS\n\n"
+                    "🤖 GH BOSS COMMANDS & CHAT\n\n"
                     "/start - Start trading\n"
                     "/stop - Stop new trades\n"
                     "/status - Current status\n"
                     "/analysis - Gemini analysis\n"
                     "/kill - Emergency stop\n"
-                    "/help - Commands"
+                    "/help - Commands\n\n"
+                    "💡 Chat with me and I will reply in Voice Notes!"
                 )
                 telegram(help_text, chat_id)
 
             else:
-                telegram("❓ Unknown command.\nUse /help", chat_id)
+                # Generate Smart Reply and send as a Voice Note!
+                reply_text = chat_with_gemini(text)
+                telegram_voice(reply_text, chat_id)
 
         return "OK", 200
     except Exception as e:
