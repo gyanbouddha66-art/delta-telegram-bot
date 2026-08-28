@@ -5,7 +5,6 @@ import threading
 import requests
 import ccxt
 
-from flask import Flask
 from google import genai
 from pydantic import BaseModel, Field
 
@@ -62,8 +61,6 @@ class TradeDecision(BaseModel):
 # ============================================================
 # GLOBAL STATE
 # ============================================================
-
-app = Flask(__name__)
 
 running = True
 last_price = 0.0
@@ -314,9 +311,9 @@ def telegram_loop():
     while True:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
-            params = {"timeout": 20, "offset": offset}
+            params = {"timeout": 25, "offset": offset}
 
-            response = requests.get(url, params=params, timeout=25)
+            response = requests.get(url, params=params, timeout=30)
             data = response.json()
 
             for update in data.get("result", []):
@@ -345,25 +342,14 @@ def telegram_loop():
             time.sleep(5)
 
 # ============================================================
-# FLASK HEALTH CHECK
-# ============================================================
-
-@app.route("/")
-def home():
-    return "GH GEMINI REAL TRADING ENGINE ONLINE"
-
-# ============================================================
-# MAIN
+# MAIN (DIRECT WORKER - NO FLASK)
 # ============================================================
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("GH BOSS GEMINI REAL-MONEY TRADER")
+    print("GH BOSS GEMINI REAL-MONEY TRADER (WORKER MODE)")
     print("=" * 60)
 
-    # Background Threads start
+    # Start Trading and Telegram directly
     threading.Thread(target=trading_engine, daemon=True).start()
-    threading.Thread(target=telegram_loop, daemon=True).start()
-
-    port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    telegram_loop()
