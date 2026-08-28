@@ -2,13 +2,14 @@ import os
 import time
 import json
 import threading
+import asyncio
 import requests
 import ccxt
+import edge_tts
 
 from flask import Flask, request
 from google import genai
 from pydantic import BaseModel, Field
-from gtts import gTTS
 
 # ============================================================
 # CONFIG
@@ -79,25 +80,29 @@ def telegram(text, chat_id=None):
     except Exception as e:
         print("Telegram Error:", e)
 
+async def generate_edge_voice(text, voice_output_path):
+    # Microsoft Edge TTS Hindi voice (MadhurNeural or SwaraNeural)
+    voice = "hi-IN-MadhurNeural"
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(voice_output_path)
+
 def telegram_voice(text, chat_id=None):
     target_chat = chat_id or TELEGRAM_CHAT_ID
     if not TELEGRAM_BOT_TOKEN or not target_chat:
         return
     try:
-        # Convert text to speech (Hindi/Hinglish)
-        tts = gTTS(text=text, lang='hi', slow=False)
-        voice_path = "response.ogg"
-        tts.save(voice_path)
+        voice_path = "response.mp3"
+        # Run Microsoft edge-tts asynchronously
+        asyncio.run(generate_edge_voice(text, voice_path))
 
-        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVoice"
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendAudio"
         with open(voice_path, "rb") as voice_file:
-            requests.post(url, data={"chat_id": target_chat}, files={"voice": voice_file}, timeout=30)
+            requests.post(url, data={"chat_id": target_chat}, files={"audio": voice_file}, timeout=30)
         
         if os.path.exists(voice_path):
             os.remove(voice_path)
     except Exception as e:
         print("Voice Error:", e)
-        # Fallback to text if voice fails
         telegram(text, chat_id)
 
 def create_exchange():
@@ -173,7 +178,7 @@ def chat_with_gemini(user_message):
     try:
         prompt = f"""
 You are GH BOSS, an intelligent, friendly, and smart AI companion and trading partner to your user (address him respectfully like 'भाई साहब'). 
-The user is talking to you on Telegram. Respond concisely (suitable for a voice note) in a smart, warm, helpful, and natural conversational tone (in Hinglish/Hindi). Keep it relatively brief so the audio note isn't too long.
+The user is talking to you on Telegram. Respond concisely (suitable for a voice note) in a smart, warm, helpful, and natural conversational tone (in Hinglish/Hindi). Keep it relatively brief.
 
 User message: {user_message}
 """
@@ -287,12 +292,12 @@ def webhook():
                     "/analysis - Gemini analysis\n"
                     "/kill - Emergency stop\n"
                     "/help - Commands\n\n"
-                    "💡 Chat with me and I will reply in Voice Notes!"
+                    "💡 Chat with me and I will reply in Microsoft Edge Voice!"
                 )
                 telegram(help_text, chat_id)
 
             else:
-                # Generate Smart Reply and send as a Voice Note!
+                # Generate Smart Reply and send as Microsoft Voice Note!
                 reply_text = chat_with_gemini(text)
                 telegram_voice(reply_text, chat_id)
 
