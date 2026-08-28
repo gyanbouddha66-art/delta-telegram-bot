@@ -12,7 +12,7 @@ from google import genai
 from pydantic import BaseModel, Field
 
 # ============================================================
-# CONFIG
+# CONFIG - PURE PROFIT & TRADING FOCUS
 # ============================================================
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -28,7 +28,7 @@ REAL_TRADING = True      # True = असली ट्रेड डेल्ट�
 AMOUNT = 1               # ट्रेड साइज
 ANALYSIS_INTERVAL = 25   # हर 25 सेकंड में सुपर-फास्ट एनालिसिस
 COOLDOWN_SECONDS = 60
-MIN_CONFIDENCE = 75      # जब तक मेरा आत्मविश्वास 75% से ऊपर न हो, ट्रेड नहीं लेगा
+MIN_CONFIDENCE = 75      # केवल हाई-प्रोबेबिलिटी प्रॉफिट ट्रेड के लिए
 
 # ============================================================
 # GEMINI
@@ -66,7 +66,6 @@ last_sl = 0.0
 last_tp = 0.0
 last_trade_time = 0
 
-# Performance Tracking Stats
 total_trades = 0
 winning_trades = 0
 losing_trades = 0
@@ -140,10 +139,27 @@ def get_market_data(exchange, symbol):
 
 def get_account_balance(exchange):
     try:
-        balance = exchange.fetch_balance()
-        # Delta wallet balance lookup (USDC/USD)
-        total_usd = balance.get('total', {}).get('USDC', balance.get('total', {}).get('USD', 0.0))
-        free_usd = balance.get('free', {}).get('USDC', balance.get('free', {}).get('USD', 0.0))
+        # FNO / Margin wallet balance fetch for Delta Exchange
+        balance = exchange.fetch_balance({'type': 'margin'})
+        total_usd = 0.0
+        free_usd = 0.0
+        
+        for currency in ['USDC', 'USD', 'USDT']:
+            if currency in balance.get('total', {}):
+                total_usd = float(balance['total'][currency] or 0.0)
+                free_usd = float(balance.get('free', {}).get(currency, 0.0))
+                if total_usd > 0:
+                    break
+        
+        if total_usd == 0.0:
+            balance_general = exchange.fetch_balance()
+            for currency in ['USDC', 'USD', 'USDT']:
+                if currency in balance_general.get('total', {}):
+                    total_usd = float(balance_general['total'][currency] or 0.0)
+                    free_usd = float(balance_general.get('free', {}).get(currency, 0.0))
+                    if total_usd > 0:
+                        break
+
         return total_usd, free_usd
     except Exception as e:
         print("Balance fetch error:", e)
@@ -169,14 +185,14 @@ def execute_trade(exchange, symbol, decision):
         return
 
     try:
-        side = decision.decision.lower() # 'buy' or 'sell'
+        side = decision.decision.lower() 
         amount = AMOUNT
         
         if not REAL_TRADING:
             print(f"Simulated Trade: {side.upper()} {amount} {symbol}")
             return
 
-        print(f"Executing Real Trade on Delta: {side.upper()} {amount} {symbol}")
+        print(f"Executing Real Profit Trade on Delta: {side.upper()} {amount} {symbol}")
         order = exchange.create_market_order(symbol, side, amount)
         last_trade_time = current_time
         total_trades += 1
@@ -184,14 +200,14 @@ def execute_trade(exchange, symbol, decision):
         total_bal, free_bal = get_account_balance(exchange)
         
         msg = (
-            f"🚀 ट्रेड ले ली गई है भाई साहब!\n"
+            f"🚀 प्रॉफिट ट्रेड ले ली गई है भाई साहब!\n"
             f"Side: {side.upper()}\n"
             f"Symbol: {symbol}\n"
             f"Entry Price: {decision.entry}\n"
             f"Wallet Balance: ${total_bal:.2f}"
         )
         telegram(msg)
-        telegram_voice(f"भाई साहब, डेल्टा पर {side} का ट्रेड ले लिया गया है। वर्तमान बैलेंस है {total_bal:.2f} डॉलर।", TELEGRAM_CHAT_ID)
+        telegram_voice(f"भाई साहब, डेल्टा पर प्रॉफिट के लिए {side} ट्रेड ले लिया गया है। वर्तमान बैलेंस है {total_bal:.2f} डॉलर।", TELEGRAM_CHAT_ID)
         
     except Exception as e:
         print("Trade Execution Error:", e)
@@ -202,13 +218,13 @@ def ask_gemini(market_data, position, balance):
         raise Exception("Gemini client not initialized")
     
     prompt = f"""
-You are GH BOSS, an elite autonomous trading brain directing Delta Exchange trades.
+You are GH BOSS, an elite autonomous trading brain focused strictly on profitable trade execution on Delta Exchange.
 SYMBOL: {SYMBOL}
 WALLET BALANCE: ${balance} USD
 CURRENT POSITION: {json.dumps(position, indent=2)}
 LIVE DATA: {json.dumps(market_data, indent=2)}
 
-Analyze market conditions with high precision. Decide: BUY, SELL or NO_TRADE.
+Analyze market conditions with high precision for maximum profit. Decide: BUY, SELL or NO_TRADE.
 Return ONLY JSON matching the schema.
 """
     response = gemini.models.generate_content(
@@ -226,7 +242,7 @@ def chat_with_gemini(user_message):
         return "Gemini client not initialized."
     try:
         prompt = f"""
-You are GH BOSS, an elite AI trading partner to your user (address him respectfully like 'भाई साहब'). 
+You are GH BOSS, an elite AI trading partner focused purely on profit and trading strategy with your user (address him respectfully like 'भाई साहब'). 
 Respond concisely in Hinglish/Hindi, suitable for a voice note.
 
 User message: {user_message}
@@ -238,11 +254,11 @@ User message: {user_message}
         return response.text
     except Exception as e:
         print("Chat Error:", e)
-        return "भाई साहब, अभी दिमाग थोड़ा व्यस्त है!"
+        return "भाई साहब, अभी दिमाग केवल प्रॉफिट पर केंद्रित है!"
 
 def trading_engine():
     global last_price, last_decision, last_confidence, last_reason, last_entry, last_sl, last_tp, winning_trades, losing_trades, last_pnl
-    print("🧠 GH BOSS MASTER TRADING ENGINE STARTED")
+    print("🧠 GH BOSS PROFIT-FOCUSED TRADING ENGINE STARTED")
     try:
         exchange = create_exchange()
         symbol = find_symbol(exchange)
@@ -262,7 +278,6 @@ def trading_engine():
             position, current_pnl = get_position_and_pnl(exchange, symbol)
             last_pnl = current_pnl
             
-            # Gemini Vision & Strategy Analysis
             decision = ask_gemini(market_data, position, total_bal)
             last_decision = decision.decision
             last_confidence = decision.confidence
@@ -273,7 +288,6 @@ def trading_engine():
             
             print(f"Analyzed {symbol} | Price: {last_price} | Balance: ${total_bal:.2f} | Decision: {last_decision} ({last_confidence}%) | PnL: ${current_pnl:.2f}")
 
-            # Execution logic
             if decision.decision in ["BUY", "SELL"] and decision.confidence >= MIN_CONFIDENCE:
                 if not position:
                     with order_lock:
@@ -290,7 +304,7 @@ def trading_engine():
 
 @app.route("/")
 def home():
-    return "GH BOSS MASTER TRADING BOT ONLINE"
+    return "GH BOSS PROFIT TRADING BOT ONLINE"
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -314,8 +328,8 @@ def webhook():
 
             if text_lower in ["/start", "start"]:
                 running = True
-                telegram("🟢 GH BOSS STRATEGY ENGINE ACTIVATED", chat_id)
-                telegram_voice(f"भाई साहब, मेरी फुल स्ट्रेटजी और विज़न के साथ ट्रेडिंग शुरू हो गई है। वर्तमान बैलेंस {total_bal:.2f} डॉलर है।", chat_id)
+                telegram("🟢 GH BOSS PROFIT ENGINE ACTIVATED", chat_id)
+                telegram_voice(f"भाई साहब, प्रॉफिट और ट्रेडिंग इंजन पूरी तरह लाइव है। वर्तमान वॉलेट बैलेंस {total_bal:.2f} डॉलर है।", chat_id)
 
             elif text_lower in ["/stop", "stop"]:
                 running = False
@@ -323,7 +337,7 @@ def webhook():
 
             elif text_lower in ["/status", "status"]:
                 status_text = (
-                    "📊 GH BOSS LIVE PERFORMANCE & STATUS\n\n"
+                    "📊 GH BOSS PROFIT & STATUS REPORT\n\n"
                     f"Engine: {'RUNNING 🟢' if running else 'PAUSED 🔴'}\n"
                     f"Symbol: {SYMBOL}\n"
                     f"Live Price: {last_price}\n"
@@ -331,14 +345,14 @@ def webhook():
                     f"📈 Open Trade PnL: ${current_pnl:.2f}\n\n"
                     f"🎯 Win Rate: {win_rate:.1f}% ({winning_trades}W / {losing_trades}L)\n"
                     f"Total Trades: {total_trades}\n\n"
-                    f"🧠 My View: {last_decision} ({last_confidence}% confidence)"
+                    f"🧠 Signal: {last_decision} ({last_confidence}% confidence)"
                 )
                 telegram(status_text, chat_id)
-                telegram_voice(f"भाई साहब, आपका वॉलेट बैलेंस {total_bal:.2f} डॉलर है, और इस समय ओपन ट्रेड का पीएनएल {current_pnl:.2f} डॉलर है।", chat_id)
+                telegram_voice(f"भाई साहब, आपका वॉलेट बैलेंस {total_bal:.2f} डॉलर है, और वर्तमान पीएनएल {current_pnl:.2f} डॉलर है।", chat_id)
 
             elif text_lower in ["/analysis", "analysis"]:
                 analysis_text = (
-                    "🧠 GEMINI STRATEGY REPORT\n\n"
+                    "🧠 PROFIT STRATEGY REPORT\n\n"
                     f"Decision: {last_decision}\n"
                     f"Confidence: {last_confidence}%\n"
                     f"Entry Target: {last_entry}\n"
