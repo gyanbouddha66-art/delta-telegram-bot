@@ -68,12 +68,13 @@ daily_trades = 0
 daily_date = time.strftime("%Y-%m-%d")
 order_lock = threading.Lock()
 
-def telegram(text):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+def telegram(text, chat_id=None):
+    target_chat = chat_id or TELEGRAM_CHAT_ID
+    if not TELEGRAM_BOT_TOKEN or not target_chat:
         return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=15)
+        requests.post(url, json={"chat_id": target_chat, "text": text}, timeout=15)
     except Exception as e:
         print("Telegram Error:", e)
 
@@ -144,14 +145,6 @@ Return ONLY JSON matching the schema.
     )
     return TradeDecision.model_validate_json(response.text)
 
-def validate_gemini_trade(decision):
-    side = decision.decision.upper()
-    if side not in ["BUY", "SELL", "NO_TRADE"] or side == "NO_TRADE":
-        return False, "No trade"
-    if decision.confidence < MIN_CONFIDENCE:
-        return False, "Low confidence"
-    return True, "OK"
-
 def trading_engine():
     global last_price, last_decision, last_confidence, last_reason, last_entry, last_sl, last_tp
     print("🧠 GEMINI AUTONOMOUS ENGINE STARTED")
@@ -174,6 +167,9 @@ def trading_engine():
             last_decision = decision.decision
             last_confidence = decision.confidence
             last_reason = decision.reason
+            last_entry = decision.entry
+            last_sl = decision.stop_loss
+            last_tp = decision.take_profit
             
             time.sleep(ANALYSIS_INTERVAL)
         except Exception as e:
@@ -181,7 +177,7 @@ def trading_engine():
             time.sleep(30)
 
 # ============================================================
-# FLASK WEBHOOK ROUTES (PERFECT FOR WEB SERVICE)
+# FLASK WEBHOOK ROUTES
 # ============================================================
 
 @app.route("/")
@@ -198,18 +194,66 @@ def webhook():
             text = msg.get("text", "").strip().lower()
             chat_id = msg["chat"]["id"]
 
-            if text == "/start":
+            if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
+                print("Unauthorized Telegram chat:", chat_id)
+                return "OK", 200
+
+            if text in ["/start", "start"]:
                 running = True
-                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", json={"chat_id": chat_id, "text": "🟢 GEMINI REAL TRADING ON"})
-            elif text == "/stop":
+                telegram("🟢 GEMINI REAL TRADING ON", chat_id)
+
+            elif text in ["/stop", "stop"]:
                 running = False
-                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", json={"chat_id": chat_id, "text": "🔴 GEMINI AUTOTRADING OFF"})
-            elif text == "/status":
-                status_text = f"📊 STATUS\nTrading: {'ON 🟢' if running else 'OFF 🔴'}\nPrice: {last_price}\nGemini: {last_decision} ({last_confidence}%)"
-                requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", json={"chat_id": chat_id, "text": status_text})
+                telegram("🔴 GEMINI AUTOTRADING OFF", chat_id)
+
+            elif text in ["/status", "status"]:
+                status_text = (
+                    "📊 GH BOSS STATUS\n\n"
+                    f"Trading: {'ON 🟢' if running else 'OFF 🔴'}\n"
+                    f"Symbol: {SYMBOL}\n"
+                    f"Price: {last_price}\n"
+                    f"Gemini: {last_decision}\n"
+                    f"Confidence: {last_confidence}%\n\n"
+                    f"Entry: {last_entry}\n"
+                    f"SL: {last_sl}\n"
+                    f"TP: {last_tp}\n\n"
+                    f"Daily trades: {daily_trades}"
+                )
+                telegram(status_text, chat_id)
+
+            elif text in ["/analysis", "analysis"]:
+                analysis_text = (
+                    "🧠 GEMINI ANALYSIS\n\n"
+                    f"Decision: {last_decision}\n\n"
+                    f"Confidence: {last_confidence}%\n\n"
+                    f"Price: {last_price}\n\n"
+                    f"Reason:\n{last_reason}"
+                )
+                telegram(analysis_text, chat_id)
+
+            elif text in ["/kill", "kill"]:
+                running = False
+                telegram("🛑 EMERGENCY KILL\nNew trades stopped.", chat_id)
+
+            elif text in ["/help", "help"]:
+                help_text = (
+                    "🤖 GH BOSS COMMANDS\n\n"
+                    "/start - Start trading\n"
+                    "/stop - Stop new trades\n"
+                    "/status - Current status\n"
+                    "/analysis - Gemini analysis\n"
+                    "/kill - Emergency stop\n"
+                    "/help - Commands"
+                )
+                telegram(help_text, chat_id)
+
+            else:
+                telegram("❓ Unknown command.\nUse /help", chat_id)
+
+        return "OK", 200
     except Exception as e:
         print("Webhook Error:", e)
-    return "OK", 200
+        return "OK", 200
 
 if __name__ == "__main__":
     threading.Thread(target=trading_engine, daemon=True).start()
