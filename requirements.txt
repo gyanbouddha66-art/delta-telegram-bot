@@ -4,3 +4,4 @@ ccxt
 google-genai
 pydantic
 edge-tts
+gunicorn
