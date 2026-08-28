@@ -1,224 +1,370 @@
 import os
 import time
 import json
-import hmac
-import hashlib
-import requests
 import threading
+import requests
+import ccxt
+
 from flask import Flask
+from google import genai
+from pydantic import BaseModel, Field
 
 # ============================================================
-# 1. API & BOT CONFIGURATION
+# CONFIG
 # ============================================================
-API_KEY = os.environ.get("DELTA_API_KEY", "nHv2Al08t6Bd8O1KSGBXCHP2ZbpmP3")
-API_SECRET = os.environ.get("DELTA_API_SECRET", "tCTPHxKcZxZ2wvk9oMyFrgDRkTK37ryjRNDM6Lhkt6neE2MfIkv9lL5vW8se")
 
-TELEGRAM_BOT_TOKEN = "8919168139:AAFo7kWLd49psCb3f6H-LQaMMSDOg4T8ZvE"
-TELEGRAM_CHAT_ID = "965643127"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-BASE_URL = "https://api.india.delta.exchange"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+
+DELTA_API_KEY = os.getenv("DELTA_API_KEY", "")
+DELTA_API_SECRET = os.getenv("DELTA_API_SECRET", "")
+
 SYMBOL = "ARCUSD"
-TIMEFRAME = "1m"
-
-# UPDATED STRATEGY PARAMETERS
-QTY = 1               
-SL_PCT = 0.015        # 1.5% Bada Trailing Stop Loss
-TP_PCT = 0.004        # 0.4% Chhota Take Profit (Fast Hit)
-MIN_ER = 0.20         
-MIN_MOMENTUM = 0.0004 
-
-session = requests.Session()
-in_position = False
 
 # ============================================================
-# 2. RENDER HEALTH CHECK SERVER
+# REAL MONEY
 # ============================================================
+
+REAL_TRADING = True
+AMOUNT = 1
+ANALYSIS_INTERVAL = 60
+COOLDOWN_SECONDS = 300
+MAX_DAILY_TRADES = 10
+MIN_CONFIDENCE = 70
+
+# ============================================================
+# GEMINI
+# ============================================================
+
+if not GEMINI_API_KEY:
+    print("⚠️ WARNING: GEMINI_API_KEY missing in environment variables!")
+    gemini = None
+else:
+    gemini = genai.Client(api_key=GEMINI_API_KEY)
+
+MODEL = "gemini-2.5-flash"
+
+# ============================================================
+# GEMINI OUTPUT SCHEMA
+# ============================================================
+
+class TradeDecision(BaseModel):
+    decision: str = Field(description="BUY, SELL or NO_TRADE")
+    confidence: int = Field(description="0 to 100")
+    entry: float = Field(description="Entry price")
+    stop_loss: float = Field(description="Stop loss price")
+    take_profit: float = Field(description="Take profit price")
+    reason: str = Field(description="Detailed market reasoning")
+    invalidation: str = Field(description="Trade invalidation condition")
+
+# ============================================================
+# GLOBAL STATE
+# ============================================================
+
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Fast Scalper Engine Active & Scanning!"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+running = True
+last_price = 0.0
+last_decision = "NO_TRADE"
+last_confidence = 0
+last_reason = "Waiting..."
+last_entry = 0.0
+last_sl = 0.0
+last_tp = 0.0
+last_trade_time = 0
+daily_trades = 0
+daily_date = time.strftime("%Y-%m-%d")
+order_lock = threading.Lock()
 
 # ============================================================
-# 3. TELEGRAM ALERT SYSTEM
+# TELEGRAM
 # ============================================================
-def send_telegram(msg):
-    print(msg)
+
+def telegram(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "Markdown"}
     try:
-        requests.post(url, json=payload, timeout=5)
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text}, timeout=15)
     except Exception as e:
-        print(f"Telegram Exception: {e}")
+        print("Telegram Error:", e)
 
 # ============================================================
-# 4. DELTA PRIVATE API & DATA HELPERS
+# DELTA EXCHANGE
 # ============================================================
-def private_request(method, endpoint, payload=None):
-    try:
-        method = method.upper()
-        timestamp = str(int(time.time()))
-        path = endpoint
-        payload_str = json.dumps(payload, separators=(',', ':')) if payload else ""
-        
-        signature = hmac.new(
-            API_SECRET.encode('utf-8'),
-            (method + timestamp + path + "" + payload_str).encode('utf-8'),
-            hashlib.sha256
-        ).hexdigest()
 
-        headers = {
-            "api-key": API_KEY,
-            "signature": signature,
-            "timestamp": timestamp,
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-        url = BASE_URL + path
-        if method == "GET":
-            return session.get(url, headers=headers, timeout=5).json()
-        return session.post(url, data=payload_str, headers=headers, timeout=5).json()
-    except Exception as e:
-        return {"error": str(e)}
+def create_exchange():
+    exchange = ccxt.delta({
+        "apiKey": DELTA_API_KEY,
+        "secret": DELTA_API_SECRET,
+        "enableRateLimit": True
+    })
+    exchange.load_markets()
+    return exchange
 
-def get_product_id():
-    try:
-        res = session.get(f"{BASE_URL}/v2/products/{SYMBOL}", timeout=5).json()
-        if res and res.get("success"):
-            return int(res["result"]["id"])
-    except Exception:
-        pass
-    return None
+def find_symbol(exchange):
+    if SYMBOL in exchange.markets:
+        return SYMBOL
+    for s in exchange.markets:
+        if SYMBOL.upper() in s.upper():
+            return s
+    raise Exception(f"Delta market not found: {SYMBOL}")
 
-def get_live_price():
-    try:
-        res = session.get(f"{BASE_URL}/v2/tickers/{SYMBOL}", timeout=5).json()
-        if res and res.get("success"):
-            return float(res["result"]["close"])
-    except Exception:
-        pass
-    return None
-
-def fetch_candles():
-    try:
-        now = int(time.time())
-        res = session.get(f"{BASE_URL}/v2/history/candles", params={"symbol": SYMBOL, "resolution": TIMEFRAME, "start": now - 1800, "end": now}, timeout=5).json()
-        if res and res.get("result"):
-            return [float(c["close"]) if isinstance(c, dict) else float(c[4]) for c in reversed(res["result"])]
-    except Exception:
-        pass
-    return []
-
-def calculate_er(prices):
-    if len(prices) < 10:
-        return 0.0
-    change = abs(prices[-1] - prices[-10])
-    volatility = sum(abs(prices[i] - prices[i-1]) for i in range(len(prices)-9, len(prices)))
-    return change / volatility if volatility > 0 else 0.0
-
-# ============================================================
-# 5. FAST ORDER EXECUTION (CHHOTA TP + TRAILING SL)
-# ============================================================
-def place_fast_trade(side, price, product_id):
-    global in_position
-    
-    # 0.4% Target
-    if side == "buy":
-        tp_price = round(price * (1 + TP_PCT), 5)
-    else:
-        tp_price = round(price * (1 - TP_PCT), 5)
-
-    # 1.5% Trailing Distance
-    trail_amount = round(price * SL_PCT, 5)
-
-    payload = {
-        "product_id": product_id,
-        "size": QTY,
-        "side": side,
-        "order_type": "market_order",
-        "stop_loss_order": {
-            "order_type": "trailing_stop_order", 
-            "trail_amount": str(trail_amount)
-        },
-        "take_profit_order": {
-            "order_type": "market_order", 
-            "stop_price": str(tp_price)
-        }
+def get_market_data(exchange, symbol):
+    data = {}
+    for tf in ["1m", "5m", "15m"]:
+        candles = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=100)
+        data[tf] = [{"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in candles]
+    ticker = exchange.fetch_ticker(symbol)
+    data["ticker"] = {
+        "last": ticker.get("last"),
+        "bid": ticker.get("bid"),
+        "ask": ticker.get("ask"),
+        "high": ticker.get("high"),
+        "low": ticker.get("low"),
+        "volume": ticker.get("baseVolume")
     }
+    return data
 
-    send_telegram(f"⚡ *FAST SIGNAL TRIGGERED!*\nSending `{side.upper()}` Order at `{price}`...")
-    res = private_request("POST", "/v2/orders", payload)
-
-    if res and res.get("success"):
-        in_position = True
-        send_telegram(f"🚀 *ORDER EXECUTED!*\nSide: `{side.upper()}`\nEntry: `{price}`\nTrailing SL Amount: `{trail_amount}` | Fast TP: `{tp_price}`")
-    else:
-        send_telegram(f"❌ *ORDER FAILED:* `{res}`")
+def get_position(exchange, symbol):
+    try:
+        positions = exchange.fetch_positions([symbol])
+        for p in positions:
+            contracts = p.get("contracts")
+            if contracts is not None and abs(float(contracts)) > 0:
+                return p
+    except Exception as e:
+        print("Position check error:", e)
+    return None
 
 # ============================================================
-# 6. SCANNER LOOP WITH AUTO-RECOVERY
+# GEMINI BRAIN
 # ============================================================
-def fast_trader_loop():
-    global in_position
-    time.sleep(3)
+
+def ask_gemini(market_data, position):
+    if not gemini:
+        raise Exception("Gemini client not initialized")
     
-    send_telegram(f"⚡ *FAST TRADER SYSTEM LIVE!*\nPair: `{SYMBOL}`\nStrategy: 0.4% Fast TP | 1.5% Trailing SL")
+    prompt = f"""
+You are GH BOSS. You are the autonomous trading brain.
+SYMBOL: {SYMBOL}
+CURRENT POSITION: {json.dumps(position, indent=2)}
+LIVE DATA: {json.dumps(market_data, indent=2)}
+
+Analyze raw market data (price action, structure, momentum, volume, volatility).
+Decide: BUY, SELL or NO_TRADE. Do not force a trade.
+If trading, provide Entry, Stop Loss, Take Profit.
+Return ONLY JSON matching the schema.
+"""
+    response = gemini.models.generate_content(
+        model=MODEL,
+        contents=prompt,
+        config={
+            "response_mime_type": "application/json",
+            "response_schema": TradeDecision
+        }
+    )
+    return TradeDecision.model_validate_json(response.text)
+
+def validate_gemini_trade(decision):
+    side = decision.decision.upper()
+    if side not in ["BUY", "SELL", "NO_TRADE"]:
+        return False, "Invalid decision"
+    if side == "NO_TRADE":
+        return False, "Gemini selected NO_TRADE"
+    if decision.confidence < MIN_CONFIDENCE:
+        return False, f"Confidence {decision.confidence}% too low"
+    
+    entry, sl, tp = float(decision.entry), float(decision.stop_loss), float(decision.take_profit)
+    if entry <= 0 or sl <= 0 or tp <= 0:
+        return False, "Invalid prices"
+    if side == "BUY" and not (sl < entry < tp):
+        return False, "Invalid BUY structure"
+    if side == "SELL" and not (tp < entry < sl):
+        return False, "Invalid SELL structure"
+    return True, "OK"
+
+def reset_daily_counter():
+    global daily_date, daily_trades
+    today = time.strftime("%Y-%m-%d")
+    if today != daily_date:
+        daily_date = today
+        daily_trades = 0
+
+def execution_gate(exchange, symbol, decision):
+    global last_trade_time, daily_trades
+    reset_daily_counter()
+    if not running:
+        return False, "Trading stopped"
+    if daily_trades >= MAX_DAILY_TRADES:
+        return False, "Daily limit reached"
+    if time.time() - last_trade_time < COOLDOWN_SECONDS:
+        return False, "Cooldown active"
+    if get_position(exchange, symbol):
+        return False, "Existing position found"
+    return validate_gemini_trade(decision)
+
+# ============================================================
+# REAL DELTA ORDER WITH BRACKET (SL & TP)
+# ============================================================
+
+def execute_real_order(exchange, symbol, decision):
+    global last_trade_time, daily_trades
+    side = "buy" if decision.decision.upper() == "BUY" else "sell"
+    close_side = "sell" if side == "buy" else "buy"
+
+    with order_lock:
+        try:
+            order = exchange.create_order(symbol=symbol, type="market", side=side, amount=AMOUNT)
+            order_id = order.get("id", "UNKNOWN")
+
+            tp_order_id = "N/A"
+            try:
+                tp_order = exchange.create_order(
+                    symbol=symbol, type="limit", side=close_side, amount=AMOUNT,
+                    price=decision.take_profit, params={"reduce_only": True}
+                )
+                tp_order_id = tp_order.get("id", "UNKNOWN")
+            except Exception as e:
+                print("TP Error:", e)
+
+            sl_order_id = "N/A"
+            try:
+                sl_order = exchange.create_order(
+                    symbol=symbol, type="stop_market", side=close_side, amount=AMOUNT,
+                    price=decision.stop_loss, params={"stop_price": decision.stop_loss, "reduce_only": True}
+                )
+                sl_order_id = sl_order.get("id", "UNKNOWN")
+            except Exception as e:
+                print("SL Error:", e)
+
+            last_trade_time = time.time()
+            daily_trades +=1
+
+            message = (
+                "🚨 GEMINI REAL BRACKET TRADE\n\n"
+                f"Symbol: {symbol}\n"
+                f"Side: {side.upper()}\n"
+                f"Amount: {AMOUNT}\n\n"
+                f"Entry ID: {order_id}\n"
+                f"TP ID: {tp_order_id} @ {decision.take_profit}\n"
+                f"SL ID: {sl_order_id} @ {decision.stop_loss}\n\n"
+                f"Confidence: {decision.confidence}%\n\n"
+                f"Reason:\n{decision.reason}"
+            )
+            telegram(message)
+        except Exception as e:
+            print("REAL ORDER FAILED:", e)
+            telegram("❌ REAL ORDER FAILED\n\n" + str(e))
+
+# ============================================================
+# AUTONOMOUS ENGINE
+# ============================================================
+
+def trading_engine():
+    global last_price, last_decision, last_confidence, last_reason, last_entry, last_sl, last_tp
+    print("🧠 GEMINI AUTONOMOUS ENGINE STARTED")
+    
+    try:
+        exchange = create_exchange()
+        symbol = find_symbol(exchange)
+        print("DELTA SYMBOL:", symbol)
+    except Exception as e:
+        print("DELTA CONNECTION ERROR:", e)
+        telegram("❌ Delta connection failed:\n" + str(e))
+        return
 
     while True:
         try:
-            product_id = get_product_id()
-            if not product_id:
-                time.sleep(5)
+            if not running:
+                time.sleep(ANALYSIS_INTERVAL)
                 continue
 
-            last_price = get_live_price()
+            market_data = get_market_data(exchange, symbol)
+            last_price = market_data["ticker"]["last"]
+            position = get_position(exchange, symbol)
 
-            while True:
-                try:
-                    time.sleep(1)
-                    price = get_live_price()
-                    if not price or not last_price:
-                        last_price = price
-                        continue
+            decision = ask_gemini(market_data, position)
+            last_decision = decision.decision
+            last_confidence = decision.confidence
+            last_reason = decision.reason
+            last_entry = decision.entry
+            last_sl = decision.stop_loss
+            last_tp = decision.take_profit
 
-                    if in_position:
-                        time.sleep(60)
-                        in_position = False
-                        continue
+            allowed, reason = execution_gate(exchange, symbol, decision)
+            if allowed:
+                execute_real_order(exchange, symbol, decision)
 
-                    price_change = (price - last_price) / last_price
+            time.sleep(ANALYSIS_INTERVAL)
+        except Exception as e:
+            print("ENGINE ERROR:", e)
+            time.sleep(30)
 
-                    if abs(price_change) >= MIN_MOMENTUM:
-                        candles = fetch_candles()
-                        er = calculate_er(candles)
+# ============================================================
+# TELEGRAM LOOP
+# ============================================================
 
-                        if er >= MIN_ER:
-                            if price_change > 0:
-                                place_fast_trade("buy", price, product_id)
-                            else:
-                                place_fast_trade("sell", price, product_id)
+def telegram_loop():
+    global running
+    offset = None
+    print("TELEGRAM CONTROL STARTED")
+    while True:
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
+            params = {"timeout": 30}
+            if offset is not None:
+                params["offset"] = offset
 
-                    last_price = price
+            response = requests.get(url, params=params, timeout=40)
+            data = response.json()
 
-                except Exception as inner_e:
-                    time.sleep(2)
+            for update in data.get("result", []):
+                offset = update["update_id"] + 1
+                if "message" not in update:
+                    continue
 
-        except Exception as outer_e:
-            send_telegram(f"⚠️ *Scanner Auto-restarting... Error:* `{outer_e}`")
+                text = update["message"].get("text", "").strip().lower()
+                if text == "/start":
+                    running = True
+                    telegram("🟢 GEMINI REAL TRADING ON")
+                elif text == "/stop":
+                    running = False
+                    telegram("🔴 GEMINI AUTOTRADING OFF")
+                elif text == "/kill":
+                    running = False
+                    telegram("🛑 EMERGENCY KILL: New trades stopped.")
+                elif text == "/status":
+                    telegram(
+                        f"📊 GH BOSS STATUS\n\nTrading: {'ON 🟢' if running else 'OFF 🔴'}\n"
+                        f"Symbol: {SYMBOL}\nPrice: {last_price}\nGemini: {last_decision}\n"
+                        f"Confidence: {last_confidence}%\nDaily trades: {daily_trades}"
+                    )
+        except Exception as e:
+            print("TELEGRAM ERROR:", e)
             time.sleep(5)
 
 # ============================================================
-# MAIN THREADS
+# FLASK HEALTH CHECK
 # ============================================================
+
+@app.route("/")
+def home():
+    return "GH GEMINI REAL TRADING ENGINE ONLINE"
+
+# ============================================================
+# MAIN
+# ============================================================
+
 if __name__ == "__main__":
-    t_web = threading.Thread(target=run_flask)
-    t_bot = threading.Thread(target=fast_trader_loop)
-    
-    t_web.start()
-    t_bot.start()
+    print("=" * 60)
+    print("GH BOSS GEMINI REAL-MONEY TRADER")
+    print("=" * 60)
+
+    threading.Thread(target=trading_engine, daemon=True).start()
+    threading.Thread(target=telegram_loop, daemon=True).start()
+
+    port = int(os.getenv("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
