@@ -24,12 +24,11 @@ DELTA_API_SECRET = os.getenv("DELTA_API_SECRET", "")
 
 SYMBOL = "ARCUSD"
 
-REAL_TRADING = True
-AMOUNT = 1
-ANALYSIS_INTERVAL = 60
-COOLDOWN_SECONDS = 300
-MAX_DAILY_TRADES = 10
-MIN_CONFIDENCE = 70
+REAL_TRADING = True      # True = असली ट्रेड डेल्टा पर लेगा
+AMOUNT = 1               # ट्रेड साइज
+ANALYSIS_INTERVAL = 25   # हर 25 सेकंड में सुपर-फास्ट एनालिसिस
+COOLDOWN_SECONDS = 60
+MIN_CONFIDENCE = 75      # जब तक मेरा आत्मविश्वास 75% से ऊपर न हो, ट्रेड नहीं लेगा
 
 # ============================================================
 # GEMINI
@@ -52,7 +51,7 @@ class TradeDecision(BaseModel):
     invalidation: str = Field(description="Trade invalidation condition")
 
 # ============================================================
-# GLOBAL STATE
+# GLOBAL STATE & STATS
 # ============================================================
 
 app = Flask(__name__)
@@ -66,8 +65,13 @@ last_entry = 0.0
 last_sl = 0.0
 last_tp = 0.0
 last_trade_time = 0
-daily_trades = 0
-daily_date = time.strftime("%Y-%m-%d")
+
+# Performance Tracking Stats
+total_trades = 0
+winning_trades = 0
+losing_trades = 0
+last_pnl = 0.0
+
 order_lock = threading.Lock()
 
 def telegram(text, chat_id=None):
@@ -81,7 +85,6 @@ def telegram(text, chat_id=None):
         print("Telegram Error:", e)
 
 async def generate_edge_voice(text, voice_output_path):
-    # Microsoft Edge TTS Hindi voice (MadhurNeural or SwaraNeural)
     voice = "hi-IN-MadhurNeural"
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(voice_output_path)
@@ -92,7 +95,6 @@ def telegram_voice(text, chat_id=None):
         return
     try:
         voice_path = "response.mp3"
-        # Run Microsoft edge-tts asynchronously
         asyncio.run(generate_edge_voice(text, voice_path))
 
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendAudio"
@@ -124,42 +126,89 @@ def find_symbol(exchange):
 
 def get_market_data(exchange, symbol):
     data = {}
-    for tf in ["1m", "5m", "15m"]:
-        candles = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=100)
+    for tf in ["1m", "5m"]:
+        candles = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=50)
         data[tf] = [{"time": c[0], "open": c[1], "high": c[2], "low": c[3], "close": c[4], "volume": c[5]} for c in candles]
     ticker = exchange.fetch_ticker(symbol)
     data["ticker"] = {
         "last": ticker.get("last"),
         "bid": ticker.get("bid"),
         "ask": ticker.get("ask"),
-        "high": ticker.get("high"),
-        "low": ticker.get("low"),
         "volume": ticker.get("baseVolume")
     }
     return data
 
-def get_position(exchange, symbol):
+def get_account_balance(exchange):
+    try:
+        balance = exchange.fetch_balance()
+        # Delta wallet balance lookup (USDC/USD)
+        total_usd = balance.get('total', {}).get('USDC', balance.get('total', {}).get('USD', 0.0))
+        free_usd = balance.get('free', {}).get('USDC', balance.get('free', {}).get('USD', 0.0))
+        return total_usd, free_usd
+    except Exception as e:
+        print("Balance fetch error:", e)
+        return 0.0, 0.0
+
+def get_position_and_pnl(exchange, symbol):
     try:
         positions = exchange.fetch_positions([symbol])
         for p in positions:
             contracts = p.get("contracts")
             if contracts is not None and abs(float(contracts)) > 0:
-                return p
+                pnl = float(p.get("unrealizedPnl", 0.0))
+                return p, pnl
     except Exception as e:
         print("Position check error:", e)
-    return None
+    return None, 0.0
 
-def ask_gemini(market_data, position):
+def execute_trade(exchange, symbol, decision):
+    global last_trade_time, total_trades
+    current_time = time.time()
+    
+    if current_time - last_trade_time < COOLDOWN_SECONDS:
+        return
+
+    try:
+        side = decision.decision.lower() # 'buy' or 'sell'
+        amount = AMOUNT
+        
+        if not REAL_TRADING:
+            print(f"Simulated Trade: {side.upper()} {amount} {symbol}")
+            return
+
+        print(f"Executing Real Trade on Delta: {side.upper()} {amount} {symbol}")
+        order = exchange.create_market_order(symbol, side, amount)
+        last_trade_time = current_time
+        total_trades += 1
+        
+        total_bal, free_bal = get_account_balance(exchange)
+        
+        msg = (
+            f"🚀 ट्रेड ले ली गई है भाई साहब!\n"
+            f"Side: {side.upper()}\n"
+            f"Symbol: {symbol}\n"
+            f"Entry Price: {decision.entry}\n"
+            f"Wallet Balance: ${total_bal:.2f}"
+        )
+        telegram(msg)
+        telegram_voice(f"भाई साहब, डेल्टा पर {side} का ट्रेड ले लिया गया है। वर्तमान बैलेंस है {total_bal:.2f} डॉलर।", TELEGRAM_CHAT_ID)
+        
+    except Exception as e:
+        print("Trade Execution Error:", e)
+        telegram(f"❌ Trade Error: {e}")
+
+def ask_gemini(market_data, position, balance):
     if not gemini:
         raise Exception("Gemini client not initialized")
     
     prompt = f"""
-You are GH BOSS. You are the autonomous trading brain.
+You are GH BOSS, an elite autonomous trading brain directing Delta Exchange trades.
 SYMBOL: {SYMBOL}
+WALLET BALANCE: ${balance} USD
 CURRENT POSITION: {json.dumps(position, indent=2)}
 LIVE DATA: {json.dumps(market_data, indent=2)}
 
-Analyze raw market data. Decide: BUY, SELL or NO_TRADE.
+Analyze market conditions with high precision. Decide: BUY, SELL or NO_TRADE.
 Return ONLY JSON matching the schema.
 """
     response = gemini.models.generate_content(
@@ -177,8 +226,8 @@ def chat_with_gemini(user_message):
         return "Gemini client not initialized."
     try:
         prompt = f"""
-You are GH BOSS, an intelligent, friendly, and smart AI companion and trading partner to your user (address him respectfully like 'भाई साहब'). 
-The user is talking to you on Telegram. Respond concisely (suitable for a voice note) in a smart, warm, helpful, and natural conversational tone (in Hinglish/Hindi). Keep it relatively brief.
+You are GH BOSS, an elite AI trading partner to your user (address him respectfully like 'भाई साहब'). 
+Respond concisely in Hinglish/Hindi, suitable for a voice note.
 
 User message: {user_message}
 """
@@ -189,11 +238,11 @@ User message: {user_message}
         return response.text
     except Exception as e:
         print("Chat Error:", e)
-        return "भाई साहब, अभी दिमाग थोड़ा बिजी है, बाद में बात करते हैं!"
+        return "भाई साहब, अभी दिमाग थोड़ा व्यस्त है!"
 
 def trading_engine():
-    global last_price, last_decision, last_confidence, last_reason, last_entry, last_sl, last_tp
-    print("🧠 GEMINI AUTONOMOUS ENGINE STARTED")
+    global last_price, last_decision, last_confidence, last_reason, last_entry, last_sl, last_tp, winning_trades, losing_trades, last_pnl
+    print("🧠 GH BOSS MASTER TRADING ENGINE STARTED")
     try:
         exchange = create_exchange()
         symbol = find_symbol(exchange)
@@ -206,10 +255,15 @@ def trading_engine():
             if not running:
                 time.sleep(ANALYSIS_INTERVAL)
                 continue
+            
             market_data = get_market_data(exchange, symbol)
             last_price = market_data["ticker"]["last"]
-            position = get_position(exchange, symbol)
-            decision = ask_gemini(market_data, position)
+            total_bal, free_bal = get_account_balance(exchange)
+            position, current_pnl = get_position_and_pnl(exchange, symbol)
+            last_pnl = current_pnl
+            
+            # Gemini Vision & Strategy Analysis
+            decision = ask_gemini(market_data, position, total_bal)
             last_decision = decision.decision
             last_confidence = decision.confidence
             last_reason = decision.reason
@@ -217,10 +271,18 @@ def trading_engine():
             last_sl = decision.stop_loss
             last_tp = decision.take_profit
             
+            print(f"Analyzed {symbol} | Price: {last_price} | Balance: ${total_bal:.2f} | Decision: {last_decision} ({last_confidence}%) | PnL: ${current_pnl:.2f}")
+
+            # Execution logic
+            if decision.decision in ["BUY", "SELL"] and decision.confidence >= MIN_CONFIDENCE:
+                if not position:
+                    with order_lock:
+                        execute_trade(exchange, symbol, decision)
+            
             time.sleep(ANALYSIS_INTERVAL)
         except Exception as e:
             print("ENGINE ERROR:", e)
-            time.sleep(30)
+            time.sleep(15)
 
 # ============================================================
 # FLASK WEBHOOK ROUTES
@@ -228,7 +290,7 @@ def trading_engine():
 
 @app.route("/")
 def home():
-    return "GH GEMINI WEB SERVICE ONLINE"
+    return "GH BOSS MASTER TRADING BOT ONLINE"
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -242,62 +304,58 @@ def webhook():
             chat_id = msg["chat"]["id"]
 
             if TELEGRAM_CHAT_ID and str(chat_id) != str(TELEGRAM_CHAT_ID):
-                print("Unauthorized Telegram chat:", chat_id)
                 return "OK", 200
 
-            # Commands Handling
+            exchange = create_exchange()
+            total_bal, free_bal = get_account_balance(exchange)
+            position, current_pnl = get_position_and_pnl(exchange, symbol=SYMBOL)
+
+            win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+
             if text_lower in ["/start", "start"]:
                 running = True
-                telegram("🟢 GEMINI REAL TRADING ON", chat_id)
+                telegram("🟢 GH BOSS STRATEGY ENGINE ACTIVATED", chat_id)
+                telegram_voice(f"भाई साहब, मेरी फुल स्ट्रेटजी और विज़न के साथ ट्रेडिंग शुरू हो गई है। वर्तमान बैलेंस {total_bal:.2f} डॉलर है।", chat_id)
 
             elif text_lower in ["/stop", "stop"]:
                 running = False
-                telegram("🔴 GEMINI AUTOTRADING OFF", chat_id)
+                telegram("🔴 TRADING PAUSED", chat_id)
 
             elif text_lower in ["/status", "status"]:
                 status_text = (
-                    "📊 GH BOSS STATUS\n\n"
-                    f"Trading: {'ON 🟢' if running else 'OFF 🔴'}\n"
+                    "📊 GH BOSS LIVE PERFORMANCE & STATUS\n\n"
+                    f"Engine: {'RUNNING 🟢' if running else 'PAUSED 🔴'}\n"
                     f"Symbol: {SYMBOL}\n"
-                    f"Price: {last_price}\n"
-                    f"Gemini: {last_decision}\n"
-                    f"Confidence: {last_confidence}%\n\n"
-                    f"Entry: {last_entry}\n"
-                    f"SL: {last_sl}\n"
-                    f"TP: {last_tp}\n\n"
-                    f"Daily trades: {daily_trades}"
+                    f"Live Price: {last_price}\n"
+                    f"💰 Wallet Balance: ${total_bal:.2f}\n"
+                    f"📈 Open Trade PnL: ${current_pnl:.2f}\n\n"
+                    f"🎯 Win Rate: {win_rate:.1f}% ({winning_trades}W / {losing_trades}L)\n"
+                    f"Total Trades: {total_trades}\n\n"
+                    f"🧠 My View: {last_decision} ({last_confidence}% confidence)"
                 )
                 telegram(status_text, chat_id)
+                telegram_voice(f"भाई साहब, आपका वॉलेट बैलेंस {total_bal:.2f} डॉलर है, और इस समय ओपन ट्रेड का पीएनएल {current_pnl:.2f} डॉलर है।", chat_id)
 
             elif text_lower in ["/analysis", "analysis"]:
                 analysis_text = (
-                    "🧠 GEMINI ANALYSIS\n\n"
-                    f"Decision: {last_decision}\n\n"
-                    f"Confidence: {last_confidence}%\n\n"
-                    f"Price: {last_price}\n\n"
-                    f"Reason:\n{last_reason}"
+                    "🧠 GEMINI STRATEGY REPORT\n\n"
+                    f"Decision: {last_decision}\n"
+                    f"Confidence: {last_confidence}%\n"
+                    f"Entry Target: {last_entry}\n"
+                    f"Stop Loss: {last_sl}\n"
+                    f"Take Profit: {last_tp}\n\n"
+                    f"Reasoning:\n{last_reason}"
                 )
                 telegram(analysis_text, chat_id)
 
             elif text_lower in ["/kill", "kill"]:
                 running = False
-                telegram("🛑 EMERGENCY KILL\nNew trades stopped.", chat_id)
+                telegram("🛑 EMERGENCY KILL SWITCH ACTIVATED", chat_id)
 
             elif text_lower in ["/help", "help"]:
-                help_text = (
-                    "🤖 GH BOSS COMMANDS & CHAT\n\n"
-                    "/start - Start trading\n"
-                    "/stop - Stop new trades\n"
-                    "/status - Current status\n"
-                    "/analysis - Gemini analysis\n"
-                    "/kill - Emergency stop\n"
-                    "/help - Commands\n\n"
-                    "💡 Chat with me and I will reply in Microsoft Edge Voice!"
-                )
-                telegram(help_text, chat_id)
+                telegram("🤖 Commands: /start, /stop, /status, /analysis, /kill\nOr chat with me normally!", chat_id)
 
             else:
-                # Generate Smart Reply and send as Microsoft Voice Note!
                 reply_text = chat_with_gemini(text)
                 telegram_voice(reply_text, chat_id)
 
