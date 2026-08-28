@@ -11,7 +11,7 @@ import edge_tts
 TELEGRAM_BOT_TOKEN = "8919168139:AAFijo1uf4BoJo1oJjqKvO9UjYj96wASpw8"  
 TELEGRAM_CHAT_ID = "965643127"              
 
-# आपकी असली Gemini API Key यहाँ सेट कर दी गई है
+# सीधी असली की यहाँ फिक्स कर दी गई है
 GEMINI_API_KEY = "AQ.Ab8RN6LBu4eJ5cldWMqexslIbvZ2Wc3aKnMlclgM-wuoOF2mFg"
 DELTA_API_KEY = "nHv2Al08t6Bd8O1KSGBXCHP2ZbpmP3"
 DELTA_API_SECRET = "tCTPHxKcZxZ2wvk9oMyFrgDRkTK37ryjRNDM6Lhkt6neE2MfIkv9lL5vW8se"
@@ -34,7 +34,7 @@ def send_telegram_message(text):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-# **सीधे गूगल API को कॉल करने का सुरक्षित तरीका**
+# **सीधे HTTP API के जरिए बिना किसी झंझट के Gemini से बात करने का फंक्शन**
 def ask_gemini(prompt_text):
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
@@ -50,11 +50,10 @@ def ask_gemini(prompt_text):
         if "candidates" in res_json:
             return res_json["candidates"][0]["content"]["parts"][0]["text"]
         else:
-            return f"API Response Error: {res_json.get('error', 'Unknown error')}"
+            return f"API Error: {res_json.get('error', {}).get('message', 'Unknown error')}"
     except Exception as e:
-        return f"Gemini Request Error: {e}"
+        return f"Request Error: {e}"
 
-# **Edge-TTS के जरिए प्रीमियम आवाज़ भेजने का फंक्शन**
 async def generate_and_send_voice(text_message):
     try:
         audio_path = "boss_voice.mp3"
