@@ -5,7 +5,7 @@ import threading
 import requests
 from flask import Flask, request
 import ccxt
-from google import genai
+import google.generativeai as genai
 import edge_tts
 
 # --- 1. CONFIGURATIONS ---
@@ -24,7 +24,13 @@ bot_running = True
 last_analysis_log = "Initializing BOSS AI..."
 last_price_val = 0.0
 
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+# Gemini Configuration (Standard Library Setup)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+else:
+    model = None
+
 app = Flask(__name__)
 
 def send_telegram_message(text):
@@ -39,11 +45,9 @@ def send_telegram_message(text):
 async def generate_and_send_voice(text_message):
     try:
         audio_path = "boss_voice.mp3"
-        # हिंदी आवाज़ (Swara Neural) का उपयोग
         communicate = edge_tts.Communicate(text_message, "hi-IN-SwaraNeural")
         await communicate.save(audio_path)
         
-        # टेलीग्राम पर वॉइस नोट भेजना
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendAudio"
         with open(audio_path, 'rb') as audio_file:
             files = {'audio': audio_file}
@@ -87,10 +91,7 @@ def telegram_webhook():
             threading.Thread(target=send_voice_sync, args=(f"अभी कॉइन का भाव है {last_price_val} डॉलर और सिस्टम चालू है।",)).start()
         else:
             try:
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=f"You are BOSS, an elite crypto trading AI. Reply shortly in Hindi/Hinglish to: '{text}'"
-                )
+                response = model.generate_content(f"You are BOSS, an elite crypto trading AI. Reply shortly in Hindi/Hinglish to: '{text}'")
                 reply = response.text
                 send_telegram_message(f"🤖 *BOSS:* {reply}")
                 threading.Thread(target=send_voice_sync, args=(reply,)).start()
@@ -131,10 +132,7 @@ def boss_autonomous_trading_loop():
                     "[ACTION: BUY] or [ACTION: SELL]. If safe, output [ACTION: HOLD]."
                 )
 
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=prompt
-                )
+                response = model.generate_content(prompt)
                 decision_text = response.text
                 last_analysis_log = decision_text
 
