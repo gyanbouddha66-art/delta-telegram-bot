@@ -5,14 +5,14 @@ import threading
 import requests
 from flask import Flask, request
 import ccxt
-import google.generativeai as genai
 import edge_tts
 
 # --- 1. CONFIGURATIONS ---
 TELEGRAM_BOT_TOKEN = "8919168139:AAFijo1uf4BoJo1oJjqKvO9UjYj96wASpw8"  
 TELEGRAM_CHAT_ID = "965643127"              
 
-GEMINI_API_KEY = "AQ.Ab8RN6LRNq3mOnbnzB3T3Yny8Uskk7DRpOajm6ssmHXavzPYAg"
+# आपकी असली Gemini API Key यहाँ सेट कर दी गई है
+GEMINI_API_KEY = "AQ.Ab8RN6LBu4eJ5cldWMqexslIbvZ2Wc3aKnMlclgM-wuoOF2mFg"
 DELTA_API_KEY = "nHv2Al08t6Bd8O1KSGBXCHP2ZbpmP3"
 DELTA_API_SECRET = "tCTPHxKcZxZ2wvk9oMyFrgDRkTK37ryjRNDM6Lhkt6neE2MfIkv9lL5vW8se"
 
@@ -24,13 +24,6 @@ bot_running = True
 last_analysis_log = "Initializing BOSS AI..."
 last_price_val = 0.0
 
-# Correct Gemini SDK Setup
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel('gemini-1.5-flash')
-else:
-    gemini_model = None
-
 app = Flask(__name__)
 
 def send_telegram_message(text):
@@ -41,7 +34,27 @@ def send_telegram_message(text):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-# **Edge-TTS के जरिए प्रीमियम आवाज़ (Voice Note) भेजने का फंक्शन**
+# **सीधे गूगल API को कॉल करने का सुरक्षित तरीका**
+def ask_gemini(prompt_text):
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+        headers = {'Content-Type': 'application/json'}
+        data = {
+            "contents": [{
+                "parts": [{"text": prompt_text}]
+            }]
+        }
+        response = requests.post(url, headers=headers, json=data)
+        res_json = response.json()
+        
+        if "candidates" in res_json:
+            return res_json["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            return f"API Response Error: {res_json.get('error', 'Unknown error')}"
+    except Exception as e:
+        return f"Gemini Request Error: {e}"
+
+# **Edge-TTS के जरिए प्रीमियम आवाज़ भेजने का फंक्शन**
 async def generate_and_send_voice(text_message):
     try:
         audio_path = "boss_voice.mp3"
@@ -66,7 +79,7 @@ def send_voice_sync(text):
 def home():
     return "⚡ BOSS Autonomous AI Trading with Edge-TTS & Telegram is Live!"
 
-# --- 2. TELEGRAM WEBHOOK (चैट और कमांड के लिए) ---
+# --- 2. TELEGRAM WEBHOOK ---
 @app.route(f'/{TELEGRAM_BOT_TOKEN}', methods=['POST'])
 def telegram_webhook():
     global bot_running
@@ -91,11 +104,8 @@ def telegram_webhook():
             threading.Thread(target=send_voice_sync, args=(f"अभी कॉइन का भाव है {last_price_val} डॉलर और सिस्टम चालू है।",)).start()
         else:
             try:
-                if gemini_model:
-                    response = gemini_model.generate_content(f"You are BOSS, an elite crypto trading AI. Reply shortly in Hindi/Hinglish to: '{text}'")
-                    reply = response.text
-                else:
-                    reply = "AI model not initialized."
+                full_prompt = f"You are BOSS, an elite crypto trading AI. Reply shortly in Hindi/Hinglish to: '{text}'"
+                reply = ask_gemini(full_prompt)
                 
                 send_telegram_message(f"🤖 *BOSS:* {reply}")
                 threading.Thread(target=send_voice_sync, args=(reply,)).start()
@@ -136,22 +146,20 @@ def boss_autonomous_trading_loop():
                     "[ACTION: BUY] or [ACTION: SELL]. If safe, output [ACTION: HOLD]."
                 )
 
-                if gemini_model:
-                    response = gemini_model.generate_content(prompt)
-                    decision_text = response.text
-                    last_analysis_log = decision_text
+                decision_text = ask_gemini(prompt)
+                last_analysis_log = decision_text
 
-                    if "[ACTION: BUY]" in decision_text:
-                        exchange.create_order(symbol=SYMBOL, type='market', side='buy', amount=AMOUNT)
-                        alert_txt = f"बधाई हो भाई! BOSS ने {current_price} डॉलर पर बाय ट्रेड ले लिया है।"
-                        send_telegram_message(f"✅ *BOSS BUY Trade Executed!*\n- Price: {current_price}\n- {decision_text}")
-                        threading.Thread(target=send_voice_sync, args=(alert_txt,)).start()
-                        
-                    elif "[ACTION: SELL]" in decision_text:
-                        exchange.create_order(symbol=SYMBOL, type='market', side='sell', amount=AMOUNT)
-                        alert_txt = f"सावधान! BOSS ने {current_price} डॉलर पर सेल ट्रेड ले लिया है।"
-                        send_telegram_message(f"🚨 *BOSS SELL Trade Executed!*\n- Price: {current_price}\n- {decision_text}")
-                        threading.Thread(target=send_voice_sync, args=(alert_txt,)).start()
+                if "[ACTION: BUY]" in decision_text:
+                    exchange.create_order(symbol=SYMBOL, type='market', side='buy', amount=AMOUNT)
+                    alert_txt = f"बधाई हो भाई! BOSS ने {current_price} डॉलर पर बाय ट्रेड ले लिया है।"
+                    send_telegram_message(f"✅ *BOSS BUY Trade Executed!*\n- Price: {current_price}\n- {decision_text}")
+                    threading.Thread(target=send_voice_sync, args=(alert_txt,)).start()
+                    
+                elif "[ACTION: SELL]" in decision_text:
+                    exchange.create_order(symbol=SYMBOL, type='market', side='sell', amount=AMOUNT)
+                    alert_txt = f"सावधान! BOSS ने {current_price} डॉलर पर सेल ट्रेड ले लिया है।"
+                    send_telegram_message(f"🚨 *BOSS SELL Trade Executed!*\n- Price: {current_price}\n- {decision_text}")
+                    threading.Thread(target=send_voice_sync, args=(alert_txt,)).start()
                 
             except Exception as e:
                 print(f"❌ Loop Error: {e}")
