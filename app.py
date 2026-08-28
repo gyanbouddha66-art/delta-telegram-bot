@@ -1,16 +1,18 @@
 import os
 import time
+import asyncio
 import threading
-from flask import Flask
-import ccxt
 import requests
+from flask import Flask, request
+import ccxt
 from google import genai
+import edge_tts
 
 # --- 1. CONFIGURATIONS ---
 TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"  
 TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"              
-GEMINI_API_KEY = "AQ.Ab8RN6LRNq3mOnbnzB3T3Yny8Uskk7DRpOajm6ssmHXavzPYAg"
 
+GEMINI_API_KEY = "AQ.Ab8RN6LRNq3mOnbnzB3T3Yny8Uskk7DRpOajm6ssmHXavzPYAg"
 DELTA_API_KEY = "nHv2Al08t6Bd8O1KSGBXCHP2ZbpmP3"
 DELTA_API_SECRET = "tCTPHxKcZxZ2wvk9oMyFrgDRkTK37ryjRNDM6Lhkt6neE2MfIkv9lL5vW8se"
 
@@ -18,29 +20,90 @@ SYMBOL = 'ARCUSD'
 AMOUNT = 1.0              
 CHECK_INTERVAL = 60       
 
-# Initialize Gemini Client safely
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+bot_running = True  
+last_analysis_log = "Initializing BOSS AI..."
+last_price_val = 0.0
 
-# --- 2. FLASK APP (Render Web Service के लिए) ---
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "⚡ BOSS Autonomous AI Trading Engine is Live & Running 24/7!"
-
-def send_telegram_message(message):
+def send_telegram_message(text):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
         requests.post(url, json=payload)
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-# --- 3. THE 24/7 BOSS TRADING LOOP ---
+# **Edge-TTS के जरिए प्रीमियम आवाज़ (Voice Note) भेजने का फंक्शन**
+async def generate_and_send_voice(text_message):
+    try:
+        audio_path = "boss_voice.mp3"
+        # हिंदी आवाज़ (Swara Neural) का उपयोग
+        communicate = edge_tts.Communicate(text_message, "hi-IN-SwaraNeural")
+        await communicate.save(audio_path)
+        
+        # टेलीग्राम पर वॉइस नोट भेजना
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendAudio"
+        with open(audio_path, 'rb') as audio_file:
+            files = {'audio': audio_file}
+            data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': "🗣️ *BOSS Voice Update*"}
+            requests.post(url, data=data, files=files)
+            
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+    except Exception as e:
+        print(f"Voice Error: {e}")
+
+def send_voice_sync(text):
+    asyncio.run(generate_and_send_voice(text))
+
+@app.route('/')
+def home():
+    return "⚡ BOSS Autonomous AI Trading with Edge-TTS & Telegram is Live!"
+
+# --- 2. TELEGRAM WEBHOOK (चैट और कमांड के लिए) ---
+@app.route(f'/{TELEGRAM_BOT_TOKEN}', methods=['POST'])
+def telegram_webhook():
+    global bot_running
+    update = request.get_json()
+    
+    if update and "message" in update:
+        text = update["message"].get("text", "").strip().lower()
+        
+        if text == "/start" or text == "start":
+            bot_running = True
+            send_telegram_message("🟢 BOSS AI फिर से चालू कर दिया गया है!")
+            threading.Thread(target=send_voice_sync, args=("बोट चालू हो गया है, अब मैं मार्केट स्कैन कर रहा हूँ।",)).start()
+            
+        elif text == "/stop" or text == "stop":
+            bot_running = False
+            send_telegram_message("🔴 BOSS AI को रोक दिया गया है।")
+            threading.Thread(target=send_voice_sync, args=("बोट को रोक दिया गया है।",)).start()
+            
+        elif text == "/status" or text == "status":
+            status_text = f"📊 *BOSS Status:*\n- State: {'Running 🟢' if bot_running else 'Stopped 🔴'}\n- Price: ${last_price_val}\n- Analysis: {last_analysis_log}"
+            send_telegram_message(status_text)
+            threading.Thread(target=send_voice_sync, args=(f"अभी कॉइन का भाव है {last_price_val} डॉलर और सिस्टम चालू है।",)).start()
+        else:
+            try:
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=f"You are BOSS, an elite crypto trading AI. Reply shortly in Hindi/Hinglish to: '{text}'"
+                )
+                reply = response.text
+                send_telegram_message(f"🤖 *BOSS:* {reply}")
+                threading.Thread(target=send_voice_sync, args=(reply,)).start()
+            except Exception as e:
+                send_telegram_message(f"Error: {e}")
+                
+    return "OK", 200
+
+# --- 3. BACKGROUND TRADING ENGINE ---
 def boss_autonomous_trading_loop():
+    global last_analysis_log, last_price_val, bot_running
     print("🚀 BOSS Background Engine Started...")
     
-    # Safe Exchange Initialization inside thread
     try:
         exchange = ccxt.delta({
             'apiKey': DELTA_API_KEY,
@@ -52,21 +115,20 @@ def boss_autonomous_trading_loop():
         exchange = None
 
     while True:
-        if exchange:
+        if bot_running and exchange:
             try:
-                print("[BOSS-AI] Scanning Market...")
                 ticker = exchange.fetch_ticker(SYMBOL)
                 current_price = ticker['last']
+                last_price_val = current_price
                 
                 ohlcv = exchange.fetch_ohlcv(SYMBOL, timeframe='1h', limit=20)
                 
                 prompt = (
                     f"You are BOSS, an elite autonomous crypto trading AI. Current market data for {SYMBOL}: "
                     f"Current Price is {current_price}. Recent candles (OHLCV): {ohlcv[-5:]}. "
-                    "Analyze the market completely based on Smart Money Concepts, price action, and momentum. "
-                    "Decide if we should take a trade right now. "
-                    "If a trade is strictly necessary, output ONLY in this exact format at the end: "
-                    "[ACTION: BUY] or [ACTION: SELL]. If no trade is safe, output [ACTION: HOLD]."
+                    "Analyze the market completely based on Smart Money Concepts. "
+                    "Output a brief analysis in Hinglish, and if a trade is necessary, end with: "
+                    "[ACTION: BUY] or [ACTION: SELL]. If safe, output [ACTION: HOLD]."
                 )
 
                 response = client.models.generate_content(
@@ -74,26 +136,29 @@ def boss_autonomous_trading_loop():
                     contents=prompt
                 )
                 decision_text = response.text
-                print(f"AI Decision: {decision_text}")
+                last_analysis_log = decision_text
 
                 if "[ACTION: BUY]" in decision_text:
                     exchange.create_order(symbol=SYMBOL, type='market', side='buy', amount=AMOUNT)
-                    send_telegram_message(f"✅ *BOSS ने खुद BUY ट्रेड लिया!*\n- Symbol: {SYMBOL}\n- Price: {current_price}")
+                    alert_txt = f"बधाई हो भाई! BOSS ने {current_price} डॉलर पर बाय ट्रेड ले लिया है।"
+                    send_telegram_message(f"✅ *BOSS BUY Trade Executed!*\n- Price: {current_price}\n- {decision_text}")
+                    threading.Thread(target=send_voice_sync, args=(alert_txt,)).start()
+                    
                 elif "[ACTION: SELL]" in decision_text:
                     exchange.create_order(symbol=SYMBOL, type='market', side='sell', amount=AMOUNT)
-                    send_telegram_message(f"🚨 *BOSS ने खुद SELL ट्रेड लिया!*\n- Symbol: {SYMBOL}\n- Price: {current_price}")
+                    alert_txt = f"सावधान! BOSS ने {current_price} डॉलर पर सेल ट्रेड ले लिया है।"
+                    send_telegram_message(f"🚨 *BOSS SELL Trade Executed!*\n- Price: {current_price}\n- {decision_text}")
+                    threading.Thread(target=send_voice_sync, args=(alert_txt,)).start()
                 
             except Exception as e:
-                print(f"❌ Loop Error / API issue: {e}")
+                print(f"❌ Loop Error: {e}")
                 
         time.sleep(CHECK_INTERVAL)
 
-# Start background thread automatically when app boots up
 def start_background_thread():
     t = threading.Thread(target=boss_autonomous_trading_loop, daemon=True)
     t.start()
 
-# Call the thread starter
 start_background_thread()
 
 if __name__ == '__main__':
