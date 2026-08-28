@@ -9,7 +9,7 @@ from google import genai
 import edge_tts
 
 # --- 1. CONFIGURATIONS ---
-TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"  
+TELEGRAM_BOT_TOKEN = "8919168139:AAFijo1uf4BoJo1oJjqKvO9UjYj96wASpw8"  
 TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"              
 
 GEMINI_API_KEY = "AQ.Ab8RN6LRNq3mOnbnzB3T3Yny8Uskk7DRpOajm6ssmHXavzPYAg"
