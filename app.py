@@ -12,7 +12,6 @@ import google.generativeai as genai
 TELEGRAM_BOT_TOKEN = "8919168139:AAFijo1uf4BoJo1oJjqKvO9UjYj96wASpw8"  
 TELEGRAM_CHAT_ID = "965643127"              
 
-# आपकी असली Gemini API Key यहाँ सेट कर दी गई है
 GEMINI_API_KEY = "AQ.Ab8RN6LBu4eJ5cIdWMqexsllbvZ2Wc3aKnMlclgM-wuoOF2mFg"
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel('gemini-1.5-pro')
@@ -41,14 +40,13 @@ def send_telegram_message(text):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-# **असली Gemini AI वाला स्मार्ट ब्रेन चैट इंजन**
+# **सुधरा हुआ Gemini AI चैट इंजन**
 def get_gemini_brain_reply(user_text, current_price, is_running):
     try:
         status_str = "चालू है (Active)" if is_running else "बंद है (Stopped)"
         prompt = f"""
         तुम एक बहुत ही स्मार्ट, शार्प और प्रोफेशनल क्रिप्टो/ट्रेडिंग पार्टनर हो (नाम: BOSS)। 
         तुम हमेशा हिंदी भाषा में, दोस्ताना और तगड़े अंदाज़ में बात करते हो ("भाई साहब" या "भाई" कहकर संबोधित करते हो)।
-        तुम्हें ट्रेडिंग, स्मार्ट मनी कॉन्सेप्ट्स, और मार्केट की पूरी समझ है।
         
         वर्तमान स्थिति:
         - कॉइन: {SYMBOL}
@@ -57,13 +55,17 @@ def get_gemini_brain_reply(user_text, current_price, is_running):
         
         यूज़र का सवाल है: "{user_text}"
         
-        इस सवाल का एकदम सटीक, स्मार्ट और नेचुरल जवाब दो (बहुत ज्यादा लंबा न हो, सीधे दिल को छूने वाला और ट्रेडिंग स्टाइल का हो)।
+        इस सवाल का एकदम सटीक, स्मार्ट और नेचुरल जवाब दो।
         """
         response = gemini_model.generate_content(prompt)
-        return response.text.strip()
+        if response and response.text:
+            return response.text.strip()
+        else:
+            return f"भाई, अभी {SYMBOL} का भाव ${current_price} चल रहा है, सब कंट्रोल में है।"
     except Exception as e:
         print(f"Gemini AI Error: {e}")
-        return f"भाई, अभी जेमिनी ब्रेन से कनेक्ट होने में हल्का सा इशू आया है। बाकी {SYMBOL} का भाव ${current_price} चल रहा है।"
+        # अगर जेमिनी एरर दे तो सीधा सादा स्मार्ट जवाब दें ताकि बोट अटके नहीं
+        return f"भाई साहब, अभी {SYMBOL} का लाइव भाव ${current_price} है। बताओ कौन सा ट्रेड मारना है?"
 
 async def generate_and_send_voice(text_message):
     try:
@@ -86,7 +88,7 @@ async def generate_and_send_voice(text_message):
 def send_voice_sync(text):
     asyncio.run(generate_and_send_voice(text))
 
-# **मास्टर ट्रेड फंक्शन (TP और SL के साथ)**
+# **मास्टर ट्रेड फंक्शन**
 def execute_trade_with_tpsl(side, entry_price, mode="Manual"):
     try:
         exchange = ccxt.delta({
@@ -121,7 +123,7 @@ def execute_trade_with_tpsl(side, entry_price, mode="Manual"):
             f"- Stop Loss (SL): ${round(sl_price, 4)}"
         )
         send_telegram_message(alert_msg)
-        threading.Thread(target=send_voice_sync, args=(f"भाई, {mode} मोड में ट्रेड ले लिया है। टारगेट और स्टॉप लॉस सेट हैं।",)).start()
+        threading.Thread(target=send_voice_sync, args=(f"भाई, {mode} मोड में {side} ट्रेड ले लिया है।",)).start()
         
     except Exception as e:
         print(f"❌ [{mode}] Trade Error: {e}")
@@ -144,13 +146,13 @@ def telegram_webhook():
         
         if text_lower == "/start" or text_lower == "start":
             bot_running = True
-            reply = "🟢 *BOSS Gemini AI Activated!* अब मेरे पास असली स्मार्ट दिमाग है, बताओ क्या बात करनी है?"
+            reply = "🟢 *BOSS Gemini AI Activated!* अब दिमाग पूरी तरह चालू है, बोलिए भाई साहब!"
             send_telegram_message(reply)
-            threading.Thread(target=send_voice_sync, args=("बोट का जेमिनी ए आई दिमाग चालू हो गया है, अब बोलिए क्या हाल है।",)).start()
+            threading.Thread(target=send_voice_sync, args=("बोट का जेमिनी ए आई दिमाग चालू हो गया है।",)).start()
             
         elif text_lower == "/stop" or text_lower == "stop":
             bot_running = False
-            reply = "🔴 *BOSS Auto-Trading Stopped!* ऑटो-ट्रेडिंग रोक दी गई है, लेकिन चैट और मैनुअल कंट्रोल चालू है।"
+            reply = "🔴 *BOSS Auto-Trading Stopped!* ऑटो-ट्रेडिंग रोक दी गई है।"
             send_telegram_message(reply)
             threading.Thread(target=send_voice_sync, args=("ऑटो ट्रेडिंग रोक दी गई है।",)).start()
             
@@ -158,11 +160,15 @@ def telegram_webhook():
             status_str = "Running 🟢" if bot_running else "Stopped 🔴"
             reply = f"📊 *BOSS AI Status:*\n- Auto-Trading: {status_str}\n- Price: ${last_price_val}\n- Symbol: {SYMBOL}"
             send_telegram_message(reply)
-            threading.Thread(target=send_voice_sync, args=(f"अभी ऑटो ट्रेडिंग {status_str} है और कॉइन का भाव {last_price_val} डॉलर है।",)).start()
+            threading.Thread(target=send_voice_sync, args=(f"अभी भाव {last_price_val} डॉलर है।",)).start()
             
-        elif text_lower == "/buy" or text_lower == "buy":
+        elif text_lower == "/buy" or text_lower == "buy" or text_lower == "long":
             send_telegram_message("⚡ *Manual BUY Command Received!*")
             threading.Thread(target=execute_trade_with_tpsl, args=('buy', last_price_val, "Manual")).start()
+            
+        elif text_lower == "/sell" or text_lower == "sell" or text_lower == "short":
+            send_telegram_message("⚡ *Manual SELL Command Received!*")
+            threading.Thread(target=execute_trade_with_tpsl, args=('sell', last_price_val, "Manual")).start()
             
         elif text:
             reply = get_gemini_brain_reply(text, last_price_val, bot_running)
