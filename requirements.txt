@@ -1,7 +1,5 @@
-flask
+Flask
+gunicorn
 requests
 ccxt
 google-genai
-pydantic
-edge-tts
-gunicorn
