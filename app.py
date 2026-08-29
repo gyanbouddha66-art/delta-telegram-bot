@@ -5,6 +5,7 @@ import requests
 from telegram_bot import process_command
 from delta_api import test_delta
 
+
 app = Flask(__name__)
 
 
@@ -14,6 +15,7 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
+
     return jsonify({
         "system": "GH AI TRADING",
         "status": "ONLINE",
@@ -28,9 +30,11 @@ def home():
 
 @app.route("/health")
 def health():
+
     return jsonify({
-        "status": "OK"
-    }), 200
+        "status": "OK",
+        "service": "GH AI TRADING"
+    })
 
 
 # ============================================================
@@ -40,24 +44,54 @@ def health():
 @app.route("/status")
 def status():
 
-    telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    delta_key = os.getenv("DELTA_API_KEY")
-    delta_secret = os.getenv("DELTA_API_SECRET")
+    telegram_token = os.getenv(
+        "TELEGRAM_BOT_TOKEN"
+    )
+
+    gemini_key = os.getenv(
+        "GEMINI_API_KEY"
+    )
+
+    delta_key = os.getenv(
+        "DELTA_API_KEY"
+    )
+
+    delta_secret = os.getenv(
+        "DELTA_API_SECRET"
+    )
 
     return jsonify({
+
         "server": "ONLINE",
-        "telegram": bool(telegram_token),
-        "gemini": bool(gemini_key),
-        "delta_key": bool(delta_key),
-        "delta_secret": bool(delta_secret),
-        "delta": bool(delta_key and delta_secret),
+
+        "telegram": bool(
+            telegram_token
+        ),
+
+        "gemini": bool(
+            gemini_key
+        ),
+
+        "delta_key": bool(
+            delta_key
+        ),
+
+        "delta_secret": bool(
+            delta_secret
+        ),
+
+        "delta": bool(
+            delta_key and delta_secret
+        ),
+
         "live_trading": False
+
     })
 
 
 # ============================================================
-# DELTA TEST
+# DELTA AUTHENTICATION TEST
+# READ ONLY — NO ORDER
 # ============================================================
 
 @app.route("/delta-test")
@@ -76,10 +110,13 @@ def delta_test():
 def my_ip():
 
     try:
-        ip = requests.get(
+
+        response = requests.get(
             "https://api.ipify.org",
             timeout=10
-        ).text.strip()
+        )
+
+        ip = response.text.strip()
 
         return jsonify({
             "public_ip": ip
@@ -96,7 +133,10 @@ def my_ip():
 # TELEGRAM WEBHOOK
 # ============================================================
 
-@app.route("/telegram", methods=["POST"])
+@app.route(
+    "/telegram",
+    methods=["POST"]
+)
 def telegram_webhook():
 
     data = request.get_json(
