@@ -4,6 +4,7 @@ import hmac
 import hashlib
 import requests
 
+
 BASE_URL = "https://api.india.delta.exchange"
 
 
@@ -16,24 +17,59 @@ def test_delta():
         return {
             "success": False,
             "stage": "credentials",
-            "error": "Delta credentials missing"
+            "error": "credentials_missing"
         }
 
-    # --------------------------------------------------------
-    # PUBLIC CONNECTION TEST
-    # --------------------------------------------------------
+    method = "GET"
+    path = "/v2/wallet/balances"
+    query_string = ""
+    payload = ""
+
+    timestamp = str(int(time.time()))
+
+    signature_payload = (
+        method
+        + timestamp
+        + path
+        + query_string
+        + payload
+    )
+
+    signature = hmac.new(
+        api_secret.encode("utf-8"),
+        signature_payload.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+
+    headers = {
+        "api-key": api_key,
+        "timestamp": timestamp,
+        "signature": signature,
+        "User-Agent": "GH-Delta-Bot",
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    }
 
     try:
 
         response = requests.get(
-            BASE_URL + "/v2/products",
+            BASE_URL + path,
+            headers=headers,
             timeout=30
         )
 
+        try:
+            data = response.json()
+        except Exception:
+            data = {
+                "raw_response": response.text[:500]
+            }
+
         return {
             "success": response.status_code == 200,
-            "stage": "public_connection",
-            "http_status": response.status_code
+            "stage": "authenticated_request",
+            "http_status": response.status_code,
+            "delta_response": data
         }
 
     except Exception as e:
