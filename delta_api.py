@@ -1,4 +1,3 @@
-
 import os
 import ccxt
 
@@ -27,19 +26,21 @@ def test_delta():
     if exchange is None:
         return {
             "success": False,
-            "message": "Delta API keys configured nahi hain."
+            "message": "Delta credentials not configured"
         }
 
     try:
         exchange.load_markets()
 
+        balance = exchange.fetch_balance()
+
         return {
             "success": True,
-            "message": "Delta API connection OK."
+            "message": "Delta authentication OK"
         }
 
     except Exception as e:
         return {
             "success": False,
-            "message": f"Delta Error: {e}"
+            "message": f"Delta authentication error: {e}"
         }
