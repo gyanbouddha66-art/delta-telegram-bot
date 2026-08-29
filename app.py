@@ -3,7 +3,7 @@ import json
 import requests
 import ccxt
 from flask import Flask, request
-import google.generativeai as genai
+from google import genai
 
 # ============================================================
 # CONFIG & API KEYS
@@ -12,6 +12,7 @@ import google.generativeai as genai
 TELEGRAM_BOT_TOKEN = "8919168139:AAFijo1uf4BoJo1oJjqKvO9UjYj96wASpw8"
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
+# आपकी दी हुई की यहाँ सेट कर दी गई है
 GEMINI_API_KEY = "AQ.Ab8RN6LBu4eJ5cIdWMqexsllbvZ2Wc3aKnMlclgM-wuoOF2mFg"
 
 DELTA_API_KEY = "nHv2Al08t6Bd8O1KSGBXCHP2ZbpmP3"
@@ -26,10 +27,10 @@ SYMBOL = "ARCUSD"
 app = Flask(__name__)
 
 if not GEMINI_API_KEY:
-    raise RuntimeError("GEMINI_API_KEY is missing")
+    raise RuntimeError("GEMINI_API_KEY is missing!")
 
-genai.configure(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-1.5-flash"
+client = genai.Client(api_key=GEMINI_API_KEY)
+MODEL_NAME = "gemini-2.5-flash"
 
 # ============================================================
 # DELTA EXCHANGE SETUP
@@ -43,10 +44,6 @@ def create_exchange():
         "secret": DELTA_API_SECRET,
         "enableRateLimit": True
     })
-
-# ============================================================
-# TRADING & EXECUTION FUNCTIONS
-# ============================================================
 
 def execute_trade(symbol, side, amount):
     exchange = create_exchange()
@@ -96,7 +93,7 @@ def telegram_send(text, chat_id=None):
         return False
 
 # ============================================================
-# BOSS AI AGENT CORE (Fixed Authentication)
+# BOSS AI AGENT CORE
 # ============================================================
 
 def run_boss_agent(user_input):
@@ -110,17 +107,16 @@ def run_boss_agent(user_input):
     )
     
     try:
-        model = genai.GenerativeModel(
-            model_name=MODEL_NAME,
-            system_instruction=system_prompt
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=f"{system_prompt}\nUser: {user_input}"
         )
-        response = model.generate_content(user_input)
         return response.text.strip()
     except Exception as e:
         return f"AI Error: {e}"
 
 # ============================================================
-# WEBHOOK ROUTE FOR TELEGRAM
+# WEBHOOK ROUTE
 # ============================================================
 
 @app.route("/", methods=["GET"])
@@ -161,7 +157,6 @@ def telegram_webhook():
             clean_reply = ai_reply.split("[ACTION:")[0].strip()
             telegram_send(clean_reply, chat_id)
             
-            # Parse actions
             if "CLOSE_ALL" in action_part:
                 res = close_all_positions()
                 telegram_send(res, chat_id)
@@ -187,10 +182,6 @@ def telegram_webhook():
         print("Webhook error:", e)
 
     return "OK", 200
-
-# ============================================================
-# MAIN RUNNER
-# ============================================================
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "10000"))
