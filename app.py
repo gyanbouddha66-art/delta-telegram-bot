@@ -3,7 +3,7 @@ import json
 import requests
 import ccxt
 from flask import Flask, request
-from google import genai
+import google.generativeai as genai
 
 # ============================================================
 # CONFIG & API KEYS
@@ -12,7 +12,6 @@ from google import genai
 TELEGRAM_BOT_TOKEN = "8919168139:AAFijo1uf4BoJo1oJjqKvO9UjYj96wASpw8"
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-# आपकी दी हुई की यहाँ सेट कर दी गई है
 GEMINI_API_KEY = "AQ.Ab8RN6LBu4eJ5cIdWMqexsllbvZ2Wc3aKnMlclgM-wuoOF2mFg"
 
 DELTA_API_KEY = "nHv2Al08t6Bd8O1KSGBXCHP2ZbpmP3"
@@ -29,8 +28,8 @@ app = Flask(__name__)
 if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is missing!")
 
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_NAME = "gemini-2.5-flash"
+genai.configure(api_key=GEMINI_API_KEY)
+MODEL_NAME = "gemini-1.5-flash"
 
 # ============================================================
 # DELTA EXCHANGE SETUP
@@ -107,10 +106,11 @@ def run_boss_agent(user_input):
     )
     
     try:
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=f"{system_prompt}\nUser: {user_input}"
+        model = genai.GenerativeModel(
+            model_name=MODEL_NAME,
+            system_instruction=system_prompt
         )
+        response = model.generate_content(user_input)
         return response.text.strip()
     except Exception as e:
         return f"AI Error: {e}"
