@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 import os
+import requests
 
 from telegram_bot import process_command
 from delta_api import test_delta
@@ -22,19 +23,18 @@ def home():
 
 
 # ============================================================
-# HEALTH CHECK
+# HEALTH
 # ============================================================
 
 @app.route("/health")
 def health():
     return jsonify({
-        "status": "OK",
-        "service": "GH AI TRADING"
+        "status": "OK"
     }), 200
 
 
 # ============================================================
-# SYSTEM STATUS
+# STATUS
 # ============================================================
 
 @app.route("/status")
@@ -47,34 +47,17 @@ def status():
 
     return jsonify({
         "server": "ONLINE",
-
-        "telegram": bool(
-            telegram_token
-        ),
-
-        "gemini": bool(
-            gemini_key
-        ),
-
-        "delta_key": bool(
-            delta_key
-        ),
-
-        "delta_secret": bool(
-            delta_secret
-        ),
-
-        "delta": bool(
-            delta_key and delta_secret
-        ),
-
+        "telegram": bool(telegram_token),
+        "gemini": bool(gemini_key),
+        "delta_key": bool(delta_key),
+        "delta_secret": bool(delta_secret),
+        "delta": bool(delta_key and delta_secret),
         "live_trading": False
-    }), 200
+    })
 
 
 # ============================================================
-# DELTA AUTHENTICATION TEST
-# READ ONLY — NO ORDER
+# DELTA TEST
 # ============================================================
 
 @app.route("/delta-test")
@@ -83,6 +66,30 @@ def delta_test():
     result = test_delta()
 
     return jsonify(result), 200
+
+
+# ============================================================
+# RENDER PUBLIC IP
+# ============================================================
+
+@app.route("/my-ip")
+def my_ip():
+
+    try:
+        ip = requests.get(
+            "https://api.ipify.org",
+            timeout=10
+        ).text.strip()
+
+        return jsonify({
+            "public_ip": ip
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "error": str(e)
+        }), 500
 
 
 # ============================================================
@@ -127,7 +134,7 @@ def telegram_webhook():
 
 
 # ============================================================
-# RUN SERVER
+# SERVER
 # ============================================================
 
 if __name__ == "__main__":
