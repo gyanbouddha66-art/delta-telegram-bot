@@ -3,7 +3,7 @@ import json
 import requests
 import ccxt
 from flask import Flask, request
-from google import genai
+import google.generativeai as genai
 
 # ============================================================
 # CONFIG & API KEYS
@@ -28,8 +28,8 @@ app = Flask(__name__)
 if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is missing")
 
-gemini = genai.Client(api_key=GEMINI_API_KEY)
-MODEL = "gemini-2.5-flash"
+genai.configure(api_key=GEMINI_API_KEY)
+MODEL_NAME = "gemini-1.5-flash"
 
 # ============================================================
 # DELTA EXCHANGE SETUP
@@ -96,7 +96,7 @@ def telegram_send(text, chat_id=None):
         return False
 
 # ============================================================
-# BOSS AI AGENT CORE
+# BOSS AI AGENT CORE (Fixed Authentication)
 # ============================================================
 
 def run_boss_agent(user_input):
@@ -110,12 +110,12 @@ def run_boss_agent(user_input):
     )
     
     try:
-        response = gemini.models.generate_content(
-            model=MODEL,
-            contents=f"{system_prompt}\nUser: {user_input}"
+        model = genai.GenerativeModel(
+            model_name=MODEL_NAME,
+            system_instruction=system_prompt
         )
-        reply = response.text.strip()
-        return reply
+        response = model.generate_content(user_input)
+        return response.text.strip()
     except Exception as e:
         return f"AI Error: {e}"
 
