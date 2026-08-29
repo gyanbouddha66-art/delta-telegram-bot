@@ -4,7 +4,6 @@ import hmac
 import hashlib
 import requests
 
-
 BASE_URL = "https://api.india.delta.exchange"
 
 
@@ -13,16 +12,25 @@ def test_delta():
     api_key = os.getenv("DELTA_API_KEY")
     api_secret = os.getenv("DELTA_API_SECRET")
 
-    if not api_key or not api_secret:
+    if not api_key:
         return {
             "success": False,
-            "message": "Delta credentials missing"
+            "stage": "credentials",
+            "error": "DELTA_API_KEY missing"
+        }
+
+    if not api_secret:
+        return {
+            "success": False,
+            "stage": "credentials",
+            "error": "DELTA_API_SECRET missing"
         }
 
     method = "GET"
     path = "/v2/wallet/balances"
     query_string = ""
     payload = ""
+
     timestamp = str(int(time.time()))
 
     signature_data = (
@@ -43,7 +51,7 @@ def test_delta():
         "api-key": api_key,
         "timestamp": timestamp,
         "signature": signature,
-        "User-Agent": "python-rest-client",
+        "User-Agent": "GH-Delta-Trading-Bot",
         "Accept": "application/json",
         "Content-Type": "application/json"
     }
@@ -56,24 +64,49 @@ def test_delta():
             timeout=20
         )
 
-        data = response.json()
+        try:
+            data = response.json()
+        except Exception:
+            data = {
+                "raw_response": response.text
+            }
 
         if response.status_code == 200:
 
             return {
                 "success": True,
+                "stage": "authentication",
+                "http_status": 200,
                 "message": "Delta authentication OK"
             }
 
         return {
             "success": False,
+            "stage": "delta_api",
             "http_status": response.status_code,
-            "message": data
+            "error": data
+        }
+
+    except requests.exceptions.Timeout:
+
+        return {
+            "success": False,
+            "stage": "network",
+            "error": "Delta request timeout"
+        }
+
+    except requests.exceptions.RequestException as e:
+
+        return {
+            "success": False,
+            "stage": "network",
+            "error": str(e)
         }
 
     except Exception as e:
 
         return {
             "success": False,
-            "message": str(e)
+            "stage": "unknown",
+            "error": str(e)
         }
