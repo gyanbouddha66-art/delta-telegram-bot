@@ -6,59 +6,125 @@ from telegram_bot import process_command
 app = Flask(__name__)
 
 
+# ============================================================
+# HOME
+# ============================================================
+
 @app.route("/")
 def home():
     return jsonify({
         "system": "GH AI TRADING",
         "status": "ONLINE",
-        "mode": "TEST"
+        "mode": "TEST",
+        "live_trading": False
     })
 
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
 
 @app.route("/health")
 def health():
     return jsonify({
-        "status": "OK"
+        "status": "OK",
+        "service": "GH AI TRADING"
     }), 200
 
+
+# ============================================================
+# SYSTEM STATUS
+# ============================================================
 
 @app.route("/status")
 def status():
+
+    telegram_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    delta_key = os.getenv("DELTA_API_KEY")
+    delta_secret = os.getenv("DELTA_API_SECRET")
+
     return jsonify({
+
         "server": "ONLINE",
-        "live_trading": False,
-        "telegram": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
-        "gemini": bool(os.getenv("GEMINI_API_KEY")),
+
+        "telegram": bool(
+            telegram_token
+        ),
+
+        "gemini": bool(
+            gemini_key
+        ),
+
+        "delta_key": bool(
+            delta_key
+        ),
+
+        "delta_secret": bool(
+            delta_secret
+        ),
+
         "delta": bool(
-            os.getenv("DELTA_API_KEY")
-            and os.getenv("DELTA_API_SECRET")
-        )
+            delta_key and delta_secret
+        ),
+
+        "live_trading": False
+
     }), 200
 
+
+# ============================================================
+# TELEGRAM WEBHOOK
+# ============================================================
 
 @app.route("/telegram", methods=["POST"])
 def telegram_webhook():
 
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(
+        silent=True
+    ) or {}
 
-    message = data.get("message", {})
-    chat = message.get("chat", {})
-    text = message.get("text")
+    message = data.get(
+        "message",
+        {}
+    )
 
-    chat_id = chat.get("id")
+    chat = message.get(
+        "chat",
+        {}
+    )
+
+    text = message.get(
+        "text"
+    )
+
+    chat_id = chat.get(
+        "id"
+    )
 
     if chat_id and text:
-        process_command(chat_id, text)
+
+        process_command(
+            chat_id,
+            text
+        )
 
     return jsonify({
         "ok": True
-    })
+    }), 200
 
+
+# ============================================================
+# RUN SERVER
+# ============================================================
 
 if __name__ == "__main__":
 
     port = int(
-        os.environ.get("PORT", 10000)
+        os.environ.get(
+            "PORT",
+            10000
+        )
     )
 
     app.run(
