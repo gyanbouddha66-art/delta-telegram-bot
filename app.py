@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import os
 
 from telegram_bot import process_command
+from delta_api import test_delta
 
 app = Flask(__name__)
 
@@ -45,7 +46,6 @@ def status():
     delta_secret = os.getenv("DELTA_API_SECRET")
 
     return jsonify({
-
         "server": "ONLINE",
 
         "telegram": bool(
@@ -69,8 +69,20 @@ def status():
         ),
 
         "live_trading": False
-
     }), 200
+
+
+# ============================================================
+# DELTA AUTHENTICATION TEST
+# READ ONLY — NO ORDER
+# ============================================================
+
+@app.route("/delta-test")
+def delta_test():
+
+    result = test_delta()
+
+    return jsonify(result), 200
 
 
 # ============================================================
