@@ -1,5 +1,5 @@
 flask
+requests
 ccxt
 google-generativeai
-requests
 gunicorn
