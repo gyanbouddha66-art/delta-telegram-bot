@@ -2,3 +2,4 @@ flask
 ccxt
 google-generativeai
 requests
+gunicorn
