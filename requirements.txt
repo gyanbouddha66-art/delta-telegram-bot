@@ -1,5 +1,4 @@
-Flask
-gunicorn
-requests
+flask
 ccxt
-google-genai
+google-generativeai
+requests
