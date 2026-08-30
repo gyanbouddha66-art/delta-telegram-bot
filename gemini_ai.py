@@ -1,38 +1,17 @@
 import os
-import traceback
-
-from google import genai
+import requests
 
 
 # ============================================================
-# GEMINI CONFIG
+# GH GEMINI DIRECT REST API
 # ============================================================
 
 API_KEY = os.getenv("GEMINI_API_KEY")
 
-_client = None
-
-
-# ============================================================
-# GEMINI CLIENT
-# ============================================================
-
-def get_client():
-
-    global _client
-
-    if _client is None:
-
-        if not API_KEY:
-            raise Exception(
-                "GEMINI_API_KEY is missing in Render Environment"
-            )
-
-        _client = genai.Client(
-            api_key=API_KEY
-        )
-
-    return _client
+GEMINI_URL = (
+    "https://generativelanguage.googleapis.com/"
+    "v1beta/models/gemini-2.5-flash:generateContent"
+)
 
 
 # ============================================================
@@ -41,52 +20,113 @@ def get_client():
 
 def ask_gemini(prompt):
 
+    if not API_KEY:
+
+        return (
+            "GEMINI ERROR\n"
+            "GEMINI_API_KEY is missing"
+        )
+
     try:
 
-        client = get_client()
-
-        # ----------------------------------------------------
-        # VERY SIMPLE ASCII-ONLY TEST
-        # ----------------------------------------------------
-
-        test_prompt = (
-            "Explain in simple English what "
-            "a professional trading system "
-            "checks before taking a trade. "
+        # ASCII-only test prompt
+        safe_prompt = (
+            "Explain how a professional trading "
+            "system evaluates market direction. "
+            "Use simple English. "
             "Do not recommend a live trade."
         )
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=test_prompt
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": safe_prompt
+                        }
+                    ]
+                }
+            ]
+        }
+
+        response = requests.post(
+            GEMINI_URL,
+            params={
+                "key": API_KEY.strip()
+            },
+            json=payload,
+            timeout=45
         )
 
-        text = response.text
+        # ----------------------------------------------------
+        # HTTP ERROR
+        # ----------------------------------------------------
+
+        if response.status_code != 200:
+
+            return (
+                "GEMINI API ERROR\n"
+                "HTTP STATUS: "
+                + str(response.status_code)
+                + "\n\n"
+                + response.text[:1500]
+            )
+
+        # ----------------------------------------------------
+        # JSON
+        # ----------------------------------------------------
+
+        data = response.json()
+
+        candidates = data.get(
+            "candidates",
+            []
+        )
+
+        if not candidates:
+
+            return (
+                "GEMINI ERROR\n"
+                "No candidates returned.\n\n"
+                + str(data)[:1500]
+            )
+
+        text = (
+            candidates[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "")
+        )
 
         if not text:
 
-            return "Gemini returned an empty response."
+            return (
+                "GEMINI ERROR\n"
+                "Empty response"
+            )
 
         return text
 
-    except Exception as e:
-
-        # ----------------------------------------------------
-        # DIAGNOSTIC ERROR
-        # ----------------------------------------------------
-
-        error_type = type(e).__name__
-
-        try:
-            error_message = str(e)
-        except Exception:
-            error_message = "Unable to read exception"
+    except requests.exceptions.RequestException as e:
 
         return (
-            "GEMINI_ERROR\n"
+            "GEMINI CONNECTION ERROR\n"
+            + str(e)
+        )
+
+    except Exception as e:
+
+        # Keep diagnostic message simple
+        try:
+            error_text = str(e)
+        except Exception:
+            error_text = "Unknown error"
+
+        return (
+            "GEMINI ERROR\n"
             "TYPE: "
-            + error_type
+            + type(e).__name__
             + "\n"
             "MESSAGE: "
-            + error_message
+            + error_text
         )
