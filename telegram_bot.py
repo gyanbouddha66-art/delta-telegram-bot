@@ -10,38 +10,55 @@ from delta_api import test_delta, get_delta_balances
 # CONFIG
 # ============================================================
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 
 
 # ============================================================
-# SEND TELEGRAM MESSAGE
+# SEND TELEGRAM
 # ============================================================
 
 def send_message(chat_id, text):
 
     if not TOKEN:
+        print("❌ TELEGRAM_BOT_TOKEN missing")
         return False
 
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-
     try:
+
+        url = (
+            f"https://api.telegram.org/"
+            f"bot{TOKEN}/sendMessage"
+        )
+
         response = requests.post(
             url,
             json={
                 "chat_id": chat_id,
                 "text": str(text)
             },
-            timeout=15
+            timeout=20
+        )
+
+        print(
+            "Telegram SEND:",
+            response.status_code,
+            response.text[:500]
         )
 
         return response.ok
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            "❌ Telegram send error:",
+            e
+        )
+
         return False
 
 
 # ============================================================
-# /START
+# START
 # ============================================================
 
 def command_start(chat_id):
@@ -49,23 +66,24 @@ def command_start(chat_id):
     send_message(
         chat_id,
 
-        "GH AI TRADING BOT\n\n"
-        "Bot connected successfully.\n\n"
-        "Mode: TEST\n"
-        "Live Trading: OFF\n\n"
+        "🧠 GH BOSS AI\n\n"
+        "✅ Telegram Connected\n"
+        "✅ Command System Online\n"
+        "✅ Gemini Module Loaded\n"
+        "✅ Delta Module Loaded\n\n"
 
-        "COMMANDS\n\n"
+        "Commands:\n\n"
         "/status - System status\n"
-        "/delta - Delta API test\n"
-        "/balance - Delta balance\n"
-        "/signal - Trading signal\n"
-        "/ai - Gemini AI\n"
+        "/delta - Delta connection test\n"
+        "/balance - Account balance\n"
+        "/signal - Current signal\n"
+        "/ai - Ask Gemini\n"
         "/help - Commands"
     )
 
 
 # ============================================================
-# /STATUS
+# STATUS
 # ============================================================
 
 def command_status(chat_id):
@@ -73,57 +91,58 @@ def command_status(chat_id):
     try:
 
         status = get_engine_status()
+
         delta = test_delta()
 
-        delta_status = (
-            "CONNECTED"
-            if delta.get("success")
-            else "ERROR"
+        delta_ok = (
+            delta.get("success", False)
         )
 
         send_message(
             chat_id,
 
-            "GH SYSTEM STATUS\n\n"
+            "📊 GH BOSS STATUS\n\n"
 
             f"Engine: "
             f"{status.get('engine', 'UNKNOWN')}\n"
 
             f"Mode: "
-            f"{status.get('mode', 'TEST')}\n"
-
-            f"Live Trading: "
-            f"{status.get('live_trading', False)}\n"
+            f"{status.get('mode', 'UNKNOWN')}\n"
 
             f"Signal: "
-            f"{status.get('signal', 'NO SIGNAL')}\n\n"
+            f"{status.get('signal', 'NO SIGNAL')}\n"
 
-            f"Delta API: {delta_status}\n"
-            "Gemini: AVAILABLE\n"
-            "Telegram: CONNECTED\n\n"
+            f"Confidence: "
+            f"{status.get('confidence', 0)}%\n\n"
 
-            "Orders: OFF"
+            f"Delta: "
+            f"{'CONNECTED 🟢' if delta_ok else 'ERROR 🔴'}\n"
+
+            "Telegram: CONNECTED 🟢\n"
+
+            f"Gemini: "
+            f"{'CONFIGURED 🟢' if os.getenv('GEMINI_API_KEY') else 'MISSING 🔴'}"
         )
 
     except Exception as e:
 
+        print("STATUS ERROR:", e)
+
         send_message(
             chat_id,
-            "STATUS ERROR\n\n" + str(e)
+            "❌ STATUS ERROR\n\n" + str(e)
         )
 
 
 # ============================================================
-# /DELTA
+# DELTA
 # ============================================================
 
 def command_delta(chat_id):
 
     send_message(
         chat_id,
-        "Testing Delta API...\n\n"
-        "Read-only request.\n"
-        "No order will be placed."
+        "🔄 Testing Delta API..."
     )
 
     try:
@@ -135,12 +154,10 @@ def command_delta(chat_id):
             send_message(
                 chat_id,
 
-                "DELTA API\n\n"
+                "🟢 DELTA API OK\n\n"
                 "Authentication: OK\n"
                 "Connection: OK\n"
-                "HTTP Status: 200\n\n"
-                "Account API: CONNECTED\n"
-                "Orders: OFF"
+                "Read-only test completed."
             )
 
         else:
@@ -148,30 +165,27 @@ def command_delta(chat_id):
             send_message(
                 chat_id,
 
-                "DELTA API ERROR\n\n"
-                f"Stage: "
-                f"{result.get('stage', 'unknown')}\n\n"
-                f"Error:\n"
-                f"{result.get('error')}"
+                "🔴 DELTA API ERROR\n\n"
+                f"{result.get('error', 'Unknown error')}"
             )
 
     except Exception as e:
 
         send_message(
             chat_id,
-            "DELTA ERROR\n\n" + str(e)
+            "❌ DELTA ERROR\n\n" + str(e)
         )
 
 
 # ============================================================
-# /BALANCE
+# BALANCE
 # ============================================================
 
 def command_balance(chat_id):
 
     send_message(
         chat_id,
-        "Checking Delta balance..."
+        "💰 Checking Delta balance..."
     )
 
     try:
@@ -183,86 +197,34 @@ def command_balance(chat_id):
             send_message(
                 chat_id,
 
-                "BALANCE ERROR\n\n"
-                + str(result.get("error"))
+                "❌ BALANCE ERROR\n\n"
+                + str(
+                    result.get(
+                        "error",
+                        "Unknown error"
+                    )
+                )
             )
 
             return
 
-        usd = result.get("usd") or {}
-        inr = result.get("inr") or {}
-        eth = result.get("eth") or {}
-        btc = result.get("btc") or {}
-
-        usd_balance = usd.get(
-            "balance",
-            "0"
-        )
-
-        usd_available = usd.get(
-            "available_balance",
-            "0"
-        )
-
-        usd_inr = usd.get(
-            "balance_inr",
-            "0"
-        )
-
-        inr_balance = inr.get(
-            "balance",
-            "0"
-        )
-
-        inr_available = inr.get(
-            "available_balance",
-            "0"
-        )
-
-        eth_balance = eth.get(
-            "balance",
-            "0"
-        )
-
-        btc_balance = btc.get(
-            "balance",
-            "0"
-        )
-
         send_message(
             chat_id,
 
-            "DELTA ACCOUNT\n\n"
-
-            "USD\n"
-            f"Balance: {usd_balance}\n"
-            f"Available: {usd_available}\n"
-            f"INR Value: {usd_inr}\n\n"
-
-            "INR\n"
-            f"Balance: {inr_balance}\n"
-            f"Available: {inr_available}\n\n"
-
-            "CRYPTO\n"
-            f"ETH: {eth_balance}\n"
-            f"BTC: {btc_balance}\n\n"
-
-            "API: CONNECTED\n"
-            "Orders: OFF"
+            "💰 DELTA ACCOUNT\n\n"
+            + str(result)
         )
 
     except Exception as e:
 
         send_message(
             chat_id,
-
-            "BALANCE ERROR\n\n"
-            + str(e)
+            "❌ BALANCE ERROR\n\n" + str(e)
         )
 
 
 # ============================================================
-# /SIGNAL
+# SIGNAL
 # ============================================================
 
 def command_signal(chat_id):
@@ -283,82 +245,80 @@ def command_signal(chat_id):
 
         reason = signal.get(
             "reason",
-            "No reason available"
+            "No reason"
         )
 
         send_message(
             chat_id,
 
-            "GH TRADING SIGNAL\n\n"
+            "📈 GH MARKET SIGNAL\n\n"
 
             f"Signal: {direction}\n"
             f"Confidence: {confidence}%\n\n"
 
-            f"Reason:\n{reason}\n\n"
-
-            "LIVE ORDER: OFF"
+            f"Analysis:\n{reason}"
         )
 
     except Exception as e:
 
         send_message(
             chat_id,
-
-            "SIGNAL ERROR\n\n"
-            + str(e)
+            "❌ SIGNAL ERROR\n\n" + str(e)
         )
 
 
 # ============================================================
-# /AI
+# GEMINI
 # ============================================================
 
 def command_ai(chat_id):
 
     send_message(
         chat_id,
-        "Gemini AI processing..."
+        "🧠 Gemini AI analyzing..."
     )
 
     try:
 
         answer = ask_gemini(
 
-            "Explain how a professional "
-            "trading system evaluates market "
-            "direction using price action, "
-            "trend, momentum, volume and risk "
-            "management. Do not recommend a "
-            "live trade."
+            "You are GH BOSS AI. "
+            "Analyze the following request "
+            "professionally and answer in Hindi:\n\n"
+            "Explain the current trading system "
+            "status and what information is required "
+            "before making a market decision."
         )
 
         answer = str(answer)
 
-        # Telegram maximum message protection
         if len(answer) > 4000:
 
             answer = (
                 answer[:3900]
-                + "\n\n...[truncated]"
+                + "\n\n...[message shortened]"
             )
 
         send_message(
             chat_id,
-            "GEMINI AI\n\n" + answer
+            "🧠 GEMINI\n\n" + answer
         )
 
     except Exception as e:
 
+        print(
+            "GEMINI COMMAND ERROR:",
+            e
+        )
+
         send_message(
             chat_id,
-
-            "GEMINI ERROR\n\n"
-            + str(e)
+            "❌ GEMINI ERROR\n\n" + str(e)
         )
 
 
 # ============================================================
-# /HELP
+# HELP
 # ============================================================
 
 def command_help(chat_id):
@@ -366,10 +326,10 @@ def command_help(chat_id):
     send_message(
         chat_id,
 
-        "GH AI TRADING BOT\n\n"
+        "🧠 GH BOSS COMMANDS\n\n"
 
         "/start\n"
-        "Start bot\n\n"
+        "Start / connection test\n\n"
 
         "/status\n"
         "System status\n\n"
@@ -378,23 +338,21 @@ def command_help(chat_id):
         "Delta API test\n\n"
 
         "/balance\n"
-        "Delta account balance\n\n"
+        "Account balance\n\n"
 
         "/signal\n"
-        "Trading signal\n\n"
+        "Current market signal\n\n"
 
         "/ai\n"
         "Gemini AI\n\n"
 
         "/help\n"
-        "Commands\n\n"
-
-        "LIVE TRADING: OFF"
+        "Commands"
     )
 
 
 # ============================================================
-# MAIN COMMAND ROUTER
+# COMMAND ROUTER
 # ============================================================
 
 def process_command(chat_id, command):
@@ -404,43 +362,56 @@ def process_command(chat_id, command):
 
     command = command.strip().lower()
 
-    # Handles /start@botname
     if "@" in command:
+
         command = command.split("@")[0]
 
-    if command == "/start":
+    print(
+        f"🎯 COMMAND RECEIVED: {command}"
+    )
 
-        command_start(chat_id)
+    try:
 
-    elif command == "/status":
+        if command == "/start":
+            command_start(chat_id)
 
-        command_status(chat_id)
+        elif command == "/status":
+            command_status(chat_id)
 
-    elif command == "/delta":
+        elif command == "/delta":
+            command_delta(chat_id)
 
-        command_delta(chat_id)
+        elif command == "/balance":
+            command_balance(chat_id)
 
-    elif command == "/balance":
+        elif command == "/signal":
+            command_signal(chat_id)
 
-        command_balance(chat_id)
+        elif command == "/ai":
+            command_ai(chat_id)
 
-    elif command == "/signal":
+        elif command == "/help":
+            command_help(chat_id)
 
-        command_signal(chat_id)
+        else:
 
-    elif command == "/ai":
+            send_message(
+                chat_id,
 
-        command_ai(chat_id)
+                "❓ Unknown command.\n\n"
+                "Use /help"
+            )
 
-    elif command == "/help":
+    except Exception as e:
 
-        command_help(chat_id)
-
-    else:
+        print(
+            "❌ COMMAND ROUTER ERROR:",
+            e
+        )
 
         send_message(
             chat_id,
 
-            "Unknown command.\n\n"
-            "Use /help"
+            "❌ COMMAND ERROR\n\n"
+            + str(e)
         )
