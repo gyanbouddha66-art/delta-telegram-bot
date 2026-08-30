@@ -3,22 +3,17 @@ import requests
 
 
 # ============================================================
-# GH GEMINI REST API
+# GH GEMINI 3.6 FLASH — INTERACTIONS API
 # ============================================================
 
-def get_gemini_key():
-
-    key = os.getenv(
-        "GEMINI_API_KEY",
-        ""
-    )
-
-    return key.strip()
-
+API_KEY = os.getenv(
+    "GEMINI_API_KEY",
+    ""
+).strip()
 
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/"
-    "v1beta/models/gemini-2.5-flash:generateContent"
+    "v1beta/interactions"
 )
 
 
@@ -28,90 +23,38 @@ GEMINI_URL = (
 
 def ask_gemini(prompt):
 
-    api_key = get_gemini_key()
-
-    # --------------------------------------------------------
-    # CHECK API KEY
-    # --------------------------------------------------------
-
-    if not api_key:
-
+    if not API_KEY:
         return (
             "GEMINI ERROR\n\n"
             "GEMINI_API_KEY is missing."
         )
 
-    # --------------------------------------------------------
-    # BASIC KEY VALIDATION
-    # --------------------------------------------------------
-
-    if "\n" in api_key or "\r" in api_key:
-
+    if "\n" in API_KEY or "\r" in API_KEY:
         return (
             "GEMINI ERROR\n\n"
-            "GEMINI_API_KEY contains a newline."
+            "GEMINI_API_KEY contains newline."
         )
-
-    # --------------------------------------------------------
-    # PROMPT
-    # --------------------------------------------------------
 
     if not prompt:
-
-        prompt = (
-            "Explain professional market analysis "
-            "using price action, trend, momentum, "
-            "volume and volatility."
-        )
-
-    prompt = str(prompt).strip()
-
-    # --------------------------------------------------------
-    # REQUEST
-    # --------------------------------------------------------
+        prompt = "Explain the current question clearly."
 
     payload = {
-
-        "contents": [
-
-            {
-
-                "parts": [
-
-                    {
-                        "text": prompt
-                    }
-
-                ]
-
-            }
-
-        ]
-
+        "model": "gemini-3.6-flash",
+        "input": str(prompt)
     }
 
     headers = {
-
-        "Content-Type":
-        "application/json",
-
-        "x-goog-api-key":
-        api_key
-
+        "x-goog-api-key": API_KEY,
+        "Content-Type": "application/json"
     }
 
     try:
 
         response = requests.post(
-
             GEMINI_URL,
-
             headers=headers,
-
             json=payload,
-
-            timeout=45
-
+            timeout=60
         )
 
         print(
@@ -119,115 +62,70 @@ def ask_gemini(prompt):
             response.status_code
         )
 
-        # ----------------------------------------------------
-        # HTTP ERROR
-        # ----------------------------------------------------
-
         if response.status_code != 200:
 
             print(
                 "GEMINI RESPONSE:",
-                response.text[:2000]
+                response.text[:3000]
             )
 
             return (
                 "GEMINI API ERROR\n\n"
-
                 "HTTP STATUS: "
                 + str(response.status_code)
-
                 + "\n\n"
-
-                + response.text[:2000]
+                + response.text[:3000]
             )
 
-        # ----------------------------------------------------
-        # JSON
-        # ----------------------------------------------------
-
-        try:
-
-            data = response.json()
-
-        except Exception:
-
-            return (
-                "GEMINI ERROR\n\n"
-                "Invalid JSON response."
-            )
+        data = response.json()
 
         # ----------------------------------------------------
-        # CANDIDATES
+        # INTERACTIONS API OUTPUT
         # ----------------------------------------------------
 
-        candidates = data.get(
-            "candidates",
+        steps = data.get(
+            "steps",
             []
         )
 
-        if not candidates:
+        texts = []
 
-            return (
-                "GEMINI ERROR\n\n"
-                "No candidates returned.\n\n"
-                + str(data)[:2000]
+        for step in steps:
+
+            if step.get("type") != "model_output":
+                continue
+
+            content = step.get(
+                "content",
+                []
             )
 
-        # ----------------------------------------------------
-        # CONTENT
-        # ----------------------------------------------------
+            for item in content:
 
-        content = candidates[0].get(
-            "content",
-            {}
-        )
+                if item.get("type") == "text":
 
-        parts = content.get(
-            "parts",
-            []
-        )
+                    text = item.get(
+                        "text",
+                        ""
+                    )
 
-        if not parts:
-
-            return (
-                "GEMINI ERROR\n\n"
-                "No response parts."
-            )
-
-        # ----------------------------------------------------
-        # TEXT
-        # ----------------------------------------------------
-
-        answer_parts = []
-
-        for part in parts:
-
-            text = part.get(
-                "text"
-            )
-
-            if text:
-
-                answer_parts.append(
-                    str(text)
-                )
+                    if text:
+                        texts.append(
+                            text
+                        )
 
         answer = "\n".join(
-            answer_parts
+            texts
         ).strip()
 
-        if not answer:
+        if answer:
+            return answer
 
-            return (
-                "GEMINI ERROR\n\n"
-                "Empty response."
-            )
-
-        return answer
-
-    # --------------------------------------------------------
-    # REQUEST ERROR
-    # --------------------------------------------------------
+        return (
+            "GEMINI ERROR\n\n"
+            "No text output returned.\n\n"
+            + str(data)[:3000]
+        )
 
     except requests.exceptions.RequestException as e:
 
@@ -240,10 +138,6 @@ def ask_gemini(prompt):
             "GEMINI CONNECTION ERROR\n\n"
             + str(e)
         )
-
-    # --------------------------------------------------------
-    # UNKNOWN ERROR
-    # --------------------------------------------------------
 
     except Exception as e:
 
