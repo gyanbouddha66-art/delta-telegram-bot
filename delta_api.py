@@ -4,11 +4,10 @@ import hmac
 import hashlib
 import requests
 
-
 BASE_URL = "https://api.india.delta.exchange"
 
 
-def test_delta():
+def get_delta_balances():
 
     api_key = os.getenv("DELTA_API_KEY")
     api_secret = os.getenv("DELTA_API_SECRET")
@@ -16,8 +15,7 @@ def test_delta():
     if not api_key or not api_secret:
         return {
             "success": False,
-            "stage": "credentials",
-            "error": "credentials_missing"
+            "error": "Delta credentials missing"
         }
 
     method = "GET"
@@ -27,7 +25,7 @@ def test_delta():
 
     timestamp = str(int(time.time()))
 
-    signature_payload = (
+    signature_data = (
         method
         + timestamp
         + path
@@ -37,7 +35,7 @@ def test_delta():
 
     signature = hmac.new(
         api_secret.encode("utf-8"),
-        signature_payload.encode("utf-8"),
+        signature_data.encode("utf-8"),
         hashlib.sha256
     ).hexdigest()
 
@@ -45,7 +43,7 @@ def test_delta():
         "api-key": api_key,
         "timestamp": timestamp,
         "signature": signature,
-        "User-Agent": "GH-Delta-Bot",
+        "User-Agent": "GH-Delta-Trading-Bot",
         "Accept": "application/json",
         "Content-Type": "application/json"
     }
@@ -58,24 +56,68 @@ def test_delta():
             timeout=30
         )
 
-        try:
-            data = response.json()
-        except Exception:
-            data = {
-                "raw_response": response.text[:500]
+        data = response.json()
+
+        if response.status_code != 200:
+
+            return {
+                "success": False,
+                "http_status": response.status_code,
+                "error": data
             }
 
+        balances = data.get("result", [])
+
+        usd = None
+        inr = None
+        eth = None
+        btc = None
+
+        for item in balances:
+
+            symbol = item.get("asset_symbol")
+
+            if symbol == "USD":
+                usd = item
+
+            elif symbol == "INR":
+                inr = item
+
+            elif symbol == "ETH":
+                eth = item
+
+            elif symbol == "BTC":
+                btc = item
+
         return {
-            "success": response.status_code == 200,
-            "stage": "authenticated_request",
-            "http_status": response.status_code,
-            "delta_response": data
+            "success": True,
+            "http_status": 200,
+
+            "usd": usd,
+            "inr": inr,
+            "eth": eth,
+            "btc": btc
         }
 
     except Exception as e:
 
         return {
             "success": False,
-            "stage": "network",
             "error": str(e)
         }
+
+
+def test_delta():
+
+    result = get_delta_balances()
+
+    if result.get("success"):
+
+        return {
+            "success": True,
+            "stage": "authenticated_request",
+            "http_status": 200,
+            "message": "Delta authentication OK"
+        }
+
+    return result
