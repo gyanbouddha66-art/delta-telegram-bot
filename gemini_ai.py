@@ -3,10 +3,18 @@ import requests
 
 
 # ============================================================
-# GH GEMINI DIRECT REST API
+# GH GEMINI REST API
 # ============================================================
 
-API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+def get_gemini_key():
+
+    key = os.getenv(
+        "GEMINI_API_KEY",
+        ""
+    )
+
+    return key.strip()
+
 
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/"
@@ -20,60 +28,95 @@ GEMINI_URL = (
 
 def ask_gemini(prompt):
 
+    api_key = get_gemini_key()
+
     # --------------------------------------------------------
-    # CHECK KEY
+    # CHECK API KEY
     # --------------------------------------------------------
 
-    if not API_KEY:
+    if not api_key:
 
         return (
-            "GEMINI ERROR\n"
-            "GEMINI_API_KEY is missing"
+            "GEMINI ERROR\n\n"
+            "GEMINI_API_KEY is missing."
         )
+
+    # --------------------------------------------------------
+    # BASIC KEY VALIDATION
+    # --------------------------------------------------------
+
+    if "\n" in api_key or "\r" in api_key:
+
+        return (
+            "GEMINI ERROR\n\n"
+            "GEMINI_API_KEY contains a newline."
+        )
+
+    # --------------------------------------------------------
+    # PROMPT
+    # --------------------------------------------------------
+
+    if not prompt:
+
+        prompt = (
+            "Explain professional market analysis "
+            "using price action, trend, momentum, "
+            "volume and volatility."
+        )
+
+    prompt = str(prompt).strip()
+
+    # --------------------------------------------------------
+    # REQUEST
+    # --------------------------------------------------------
+
+    payload = {
+
+        "contents": [
+
+            {
+
+                "parts": [
+
+                    {
+                        "text": prompt
+                    }
+
+                ]
+
+            }
+
+        ]
+
+    }
+
+    headers = {
+
+        "Content-Type":
+        "application/json",
+
+        "x-goog-api-key":
+        api_key
+
+    }
 
     try:
 
-        # ----------------------------------------------------
-        # ASCII ONLY TEST PROMPT
-        # ----------------------------------------------------
+        response = requests.post(
 
-        safe_prompt = (
-            "Explain how a professional trading "
-            "system evaluates market direction. "
-            "Use simple English. "
-            "Do not recommend a live trade."
+            GEMINI_URL,
+
+            headers=headers,
+
+            json=payload,
+
+            timeout=45
+
         )
 
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": safe_prompt
-                        }
-                    ]
-                }
-            ]
-        }
-
-        # ----------------------------------------------------
-        # API KEY IN HEADER
-        # ----------------------------------------------------
-
-        headers = {
-            "x-goog-api-key": API_KEY,
-            "Content-Type": "application/json"
-        }
-
-        # ----------------------------------------------------
-        # GEMINI REQUEST
-        # ----------------------------------------------------
-
-        response = requests.post(
-            GEMINI_URL,
-            headers=headers,
-            json=payload,
-            timeout=45
+        print(
+            "GEMINI HTTP:",
+            response.status_code
         )
 
         # ----------------------------------------------------
@@ -82,19 +125,40 @@ def ask_gemini(prompt):
 
         if response.status_code != 200:
 
+            print(
+                "GEMINI RESPONSE:",
+                response.text[:2000]
+            )
+
             return (
-                "GEMINI API ERROR\n"
+                "GEMINI API ERROR\n\n"
+
                 "HTTP STATUS: "
                 + str(response.status_code)
+
                 + "\n\n"
+
                 + response.text[:2000]
             )
 
         # ----------------------------------------------------
-        # JSON RESPONSE
+        # JSON
         # ----------------------------------------------------
 
-        data = response.json()
+        try:
+
+            data = response.json()
+
+        except Exception:
+
+            return (
+                "GEMINI ERROR\n\n"
+                "Invalid JSON response."
+            )
+
+        # ----------------------------------------------------
+        # CANDIDATES
+        # ----------------------------------------------------
 
         candidates = data.get(
             "candidates",
@@ -104,10 +168,14 @@ def ask_gemini(prompt):
         if not candidates:
 
             return (
-                "GEMINI ERROR\n"
+                "GEMINI ERROR\n\n"
                 "No candidates returned.\n\n"
-                + str(data)[:1500]
+                + str(data)[:2000]
             )
+
+        # ----------------------------------------------------
+        # CONTENT
+        # ----------------------------------------------------
 
         content = candidates[0].get(
             "content",
@@ -122,46 +190,73 @@ def ask_gemini(prompt):
         if not parts:
 
             return (
-                "GEMINI ERROR\n"
-                "No response parts returned."
+                "GEMINI ERROR\n\n"
+                "No response parts."
             )
 
-        text = parts[0].get(
-            "text",
-            ""
-        )
+        # ----------------------------------------------------
+        # TEXT
+        # ----------------------------------------------------
 
-        if not text:
+        answer_parts = []
+
+        for part in parts:
+
+            text = part.get(
+                "text"
+            )
+
+            if text:
+
+                answer_parts.append(
+                    str(text)
+                )
+
+        answer = "\n".join(
+            answer_parts
+        ).strip()
+
+        if not answer:
 
             return (
-                "GEMINI ERROR\n"
-                "Empty Gemini response."
+                "GEMINI ERROR\n\n"
+                "Empty response."
             )
 
-        return str(text)
+        return answer
 
     # --------------------------------------------------------
-    # CONNECTION ERROR
+    # REQUEST ERROR
     # --------------------------------------------------------
 
     except requests.exceptions.RequestException as e:
 
+        print(
+            "GEMINI CONNECTION ERROR:",
+            repr(e)
+        )
+
         return (
-            "GEMINI CONNECTION ERROR\n"
+            "GEMINI CONNECTION ERROR\n\n"
             + str(e)
         )
 
     # --------------------------------------------------------
-    # OTHER ERROR
+    # UNKNOWN ERROR
     # --------------------------------------------------------
 
     except Exception as e:
 
+        print(
+            "GEMINI ERROR:",
+            repr(e)
+        )
+
         return (
-            "GEMINI ERROR\n"
+            "GEMINI ERROR\n\n"
             "TYPE: "
             + type(e).__name__
-            + "\n"
+            + "\n\n"
             "MESSAGE: "
             + str(e)
         )
