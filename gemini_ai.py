@@ -6,7 +6,7 @@ import requests
 # GH GEMINI DIRECT REST API
 # ============================================================
 
-API_KEY = os.getenv("GEMINI_API_KEY")
+API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
 
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/"
@@ -20,6 +20,10 @@ GEMINI_URL = (
 
 def ask_gemini(prompt):
 
+    # --------------------------------------------------------
+    # CHECK KEY
+    # --------------------------------------------------------
+
     if not API_KEY:
 
         return (
@@ -29,7 +33,10 @@ def ask_gemini(prompt):
 
     try:
 
-        # ASCII-only test prompt
+        # ----------------------------------------------------
+        # ASCII ONLY TEST PROMPT
+        # ----------------------------------------------------
+
         safe_prompt = (
             "Explain how a professional trading "
             "system evaluates market direction. "
@@ -49,11 +56,22 @@ def ask_gemini(prompt):
             ]
         }
 
+        # ----------------------------------------------------
+        # API KEY IN HEADER
+        # ----------------------------------------------------
+
+        headers = {
+            "x-goog-api-key": API_KEY,
+            "Content-Type": "application/json"
+        }
+
+        # ----------------------------------------------------
+        # GEMINI REQUEST
+        # ----------------------------------------------------
+
         response = requests.post(
             GEMINI_URL,
-            params={
-                "key": API_KEY.strip()
-            },
+            headers=headers,
             json=payload,
             timeout=45
         )
@@ -69,11 +87,11 @@ def ask_gemini(prompt):
                 "HTTP STATUS: "
                 + str(response.status_code)
                 + "\n\n"
-                + response.text[:1500]
+                + response.text[:2000]
             )
 
         # ----------------------------------------------------
-        # JSON
+        # JSON RESPONSE
         # ----------------------------------------------------
 
         data = response.json()
@@ -91,21 +109,40 @@ def ask_gemini(prompt):
                 + str(data)[:1500]
             )
 
-        text = (
-            candidates[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
+        content = candidates[0].get(
+            "content",
+            {}
+        )
+
+        parts = content.get(
+            "parts",
+            []
+        )
+
+        if not parts:
+
+            return (
+                "GEMINI ERROR\n"
+                "No response parts returned."
+            )
+
+        text = parts[0].get(
+            "text",
+            ""
         )
 
         if not text:
 
             return (
                 "GEMINI ERROR\n"
-                "Empty response"
+                "Empty Gemini response."
             )
 
-        return text
+        return str(text)
+
+    # --------------------------------------------------------
+    # CONNECTION ERROR
+    # --------------------------------------------------------
 
     except requests.exceptions.RequestException as e:
 
@@ -114,13 +151,11 @@ def ask_gemini(prompt):
             + str(e)
         )
 
-    except Exception as e:
+    # --------------------------------------------------------
+    # OTHER ERROR
+    # --------------------------------------------------------
 
-        # Keep diagnostic message simple
-        try:
-            error_text = str(e)
-        except Exception:
-            error_text = "Unknown error"
+    except Exception as e:
 
         return (
             "GEMINI ERROR\n"
@@ -128,5 +163,5 @@ def ask_gemini(prompt):
             + type(e).__name__
             + "\n"
             "MESSAGE: "
-            + error_text
+            + str(e)
         )
