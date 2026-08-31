@@ -4,14 +4,14 @@ import time
 import threading
 import requests
 
-from telegram_bot import process_command
+from telegram_bot import process_command, process_voice
 from delta_api import test_delta
 
 
 # ============================================================
 # GH BOSS AI — APP
+# GROQ + TELEGRAM + DELTA + VOICE
 # GEMINI REMOVED
-# GROQ + TELEGRAM + DELTA
 # ============================================================
 
 app = Flask(__name__)
@@ -181,6 +181,10 @@ def telegram_connection_test():
             "❌ BOT CONNECTION FAILED"
         )
 
+        print(
+            response.text[:500]
+        )
+
         return False
 
     except Exception as e:
@@ -249,6 +253,7 @@ def remove_webhook():
 
 # ============================================================
 # TELEGRAM POLLING
+# TEXT + VOICE
 # ============================================================
 
 def telegram_polling():
@@ -318,6 +323,10 @@ def telegram_polling():
 
             for update in updates:
 
+                # ============================================
+                # UPDATE OFFSET
+                # ============================================
+
                 offset = (
                     update.get(
                         "update_id",
@@ -329,6 +338,10 @@ def telegram_polling():
                     "🔥 TELEGRAM UPDATE RECEIVED"
                 )
 
+                # ============================================
+                # MESSAGE
+                # ============================================
+
                 message = update.get(
                     "message"
                 )
@@ -336,6 +349,10 @@ def telegram_polling():
                 if not message:
 
                     continue
+
+                # ============================================
+                # CHAT
+                # ============================================
 
                 chat = message.get(
                     "chat",
@@ -346,34 +363,18 @@ def telegram_polling():
                     "id"
                 )
 
-                text = message.get(
-                    "text",
-                    ""
-                )
-
-                text = str(text).strip()
-
                 if not chat_id:
 
                     continue
-
-                if not text:
-
-                    continue
-
-                print(
-                    "📩 MESSAGE:",
-                    text
-                )
 
                 print(
                     "👤 CHAT ID:",
                     chat_id
                 )
 
-                # ====================================================
-                # CHAT ID SECURITY
-                # ====================================================
+                # ============================================
+                # CHAT SECURITY
+                # ============================================
 
                 if (
 
@@ -394,9 +395,101 @@ def telegram_polling():
 
                     continue
 
-                # ====================================================
-                # PROCESS MESSAGE
-                # ====================================================
+                # ============================================
+                # VOICE MESSAGE
+                # ============================================
+
+                voice = message.get(
+                    "voice"
+                )
+
+                if voice:
+
+                    file_id = voice.get(
+                        "file_id"
+                    )
+
+                    if not file_id:
+
+                        print(
+                            "❌ Voice file_id missing"
+                        )
+
+                        telegram_send(
+
+                            "❌ Voice file नहीं मिला।",
+
+                            chat_id
+                        )
+
+                        continue
+
+                    print(
+                        "🎤 VOICE MESSAGE RECEIVED"
+                    )
+
+                    print(
+                        "🎤 FILE ID:",
+                        file_id
+                    )
+
+                    try:
+
+                        result = process_voice(
+
+                            chat_id,
+
+                            file_id
+
+                        )
+
+                        print(
+                            "VOICE RESULT:",
+                            result
+                        )
+
+                    except Exception as e:
+
+                        print(
+                            "❌ process_voice ERROR:",
+                            e
+                        )
+
+                        telegram_send(
+
+                            "❌ Voice processing error:\n"
+                            + str(e),
+
+                            chat_id
+                        )
+
+                    continue
+
+                # ============================================
+                # TEXT MESSAGE
+                # ============================================
+
+                text = message.get(
+                    "text",
+                    ""
+                )
+
+                text = str(
+                    text
+                ).strip()
+
+                if not text:
+
+                    continue
+
+                print(
+                    "📩 MESSAGE:",
+                    text
+                )
+
+                # ============================================
+                # PROCESS TEXT COMMAND
+                # ============================================
 
                 try:
 
@@ -464,18 +557,35 @@ def home():
         (
             "CONFIGURED"
             if TELEGRAM_BOT_TOKEN
-            else "MISSING"
+            else
+            "MISSING"
         ),
 
         "telegram_mode":
         "POLLING",
 
+        "text_chat":
+        "ENABLED",
+
+        "voice_input":
+        "ENABLED",
+
+        "voice_reply":
+        "ENABLED",
+
         "ai":
         (
             "GROQ"
             if GROQ_API_KEY
-            else "GROQ KEY MISSING"
+            else
+            "GROQ KEY MISSING"
         ),
+
+        "voice_stt":
+        "GROQ WHISPER",
+
+        "voice_tts":
+        "EDGE-TTS",
 
         "gemini":
         "REMOVED",
@@ -514,8 +624,23 @@ def health():
         "telegram_polling":
         True,
 
+        "text_chat":
+        True,
+
+        "voice_input":
+        True,
+
+        "voice_reply":
+        True,
+
         "ai":
         "GROQ",
+
+        "voice_stt":
+        "GROQ WHISPER",
+
+        "voice_tts":
+        "EDGE-TTS",
 
         "gemini":
         False
@@ -579,7 +704,22 @@ def status():
         ),
 
         "telegram_mode":
-        "POLLING"
+        "POLLING",
+
+        "text_chat":
+        "ENABLED",
+
+        "voice_input":
+        "ENABLED",
+
+        "voice_reply":
+        "ENABLED",
+
+        "voice_stt":
+        "GROQ WHISPER",
+
+        "voice_tts":
+        "EDGE-TTS"
 
     })
 
@@ -655,21 +795,21 @@ def start_background_services():
         "🚀 STARTING BACKGROUND SERVICES"
     )
 
-    # --------------------------------------------------------
-    # REMOVE WEBHOOK BEFORE POLLING
-    # --------------------------------------------------------
+    # ========================================
+    # REMOVE WEBHOOK
+    # ========================================
 
     remove_webhook()
 
-    # --------------------------------------------------------
-    # TELEGRAM CONNECTION
-    # --------------------------------------------------------
+    # ========================================
+    # TELEGRAM CONNECTION TEST
+    # ========================================
 
     telegram_connection_test()
 
-    # --------------------------------------------------------
-    # TELEGRAM POLLING
-    # --------------------------------------------------------
+    # ========================================
+    # TELEGRAM POLLING THREAD
+    # ========================================
 
     telegram_thread = threading.Thread(
 
@@ -685,6 +825,14 @@ def start_background_services():
 
     print(
         "✅ Telegram thread started"
+    )
+
+    print(
+        "🎤 Voice input enabled"
+    )
+
+    print(
+        "🔊 Voice reply enabled"
     )
 
 
