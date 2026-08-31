@@ -18,6 +18,21 @@ EDGE_TTS_VOICE = "hi-IN-SwaraNeural"
 
 
 # ============================================================
+# VOICE STATUS (REQUIRED BY TELEGRAM BOT)
+# ============================================================
+
+def voice_status():
+    return {
+        "voice_input": bool(GROQ_API_KEY),
+        "stt": "Groq Whisper",
+        "stt_model": WHISPER_MODEL,
+        "tts": "Edge-TTS",
+        "tts_voice": EDGE_TTS_VOICE,
+        "telegram": bool(TOKEN)
+    }
+
+
+# ============================================================
 # SEND TELEGRAM TEXT (WITH CHUNKING TO PREVENT LENGTH ERROR)
 # ============================================================
 
@@ -28,7 +43,6 @@ def send_message(chat_id, text):
 
     try:
         text_str = str(text)
-        # अगर संदेश बहुत लंबा है (4000+ characters), तो उसे टुकड़ों में भेजें
         if len(text_str) > 3900:
             chunks = [text_str[i:i+3900] for i in range(0, len(text_str), 3900)]
             success = True
@@ -103,7 +117,6 @@ def download_telegram_file(file_id):
         if not audio_response.ok:
             return None
 
-        # Whisper के लिए हमेशा .ogg या .mp3 एक्सटेंशन इस्तेमाल करें ताकि 400 Error न आए
         temp = tempfile.NamedTemporaryFile(delete=False, suffix=".ogg")
         temp.write(audio_response.content)
         temp.close()
