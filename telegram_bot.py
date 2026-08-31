@@ -1,6 +1,8 @@
 import os
 import tempfile
+import asyncio
 import requests
+import edge_tts
 
 from trading_engine import get_engine_status, get_signal
 from groq_ai import ask_groq
@@ -8,17 +10,29 @@ from delta_api import test_delta, get_delta_balances
 
 
 # ============================================================
-# CONFIG
+# GH BOSS AI — TELEGRAM BOT
+# GROQ + TELEGRAM + DELTA + VOICE
 # ============================================================
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+TOKEN = os.getenv(
+    "TELEGRAM_BOT_TOKEN",
+    ""
+).strip()
 
-TELEGRAM_API = f"https://api.telegram.org/bot{TOKEN}"
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_TRANSCRIBE_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
+GROQ_API_KEY = os.getenv(
+    "GROQ_API_KEY",
+    ""
+).strip()
 
-# Groq voice model
+
+TELEGRAM_API = (
+    f"https://api.telegram.org/bot{TOKEN}"
+)
+
+GROQ_TRANSCRIBE_URL = (
+    "https://api.groq.com/openai/v1/audio/transcriptions"
+)
+
 WHISPER_MODEL = "whisper-large-v3-turbo"
 
 
@@ -29,16 +43,24 @@ WHISPER_MODEL = "whisper-large-v3-turbo"
 def send_message(chat_id, text):
 
     if not TOKEN:
-        print("❌ TELEGRAM_BOT_TOKEN missing")
+
+        print(
+            "❌ TELEGRAM_BOT_TOKEN missing"
+        )
+
         return False
 
     try:
+
         response = requests.post(
+
             f"{TELEGRAM_API}/sendMessage",
+
             json={
                 "chat_id": chat_id,
                 "text": str(text)
             },
+
             timeout=20
         )
 
@@ -52,7 +74,11 @@ def send_message(chat_id, text):
 
     except Exception as e:
 
-        print("❌ Telegram Error:", e)
+        print(
+            "❌ Telegram Error:",
+            e
+        )
+
         return False
 
 
@@ -63,20 +89,32 @@ def send_message(chat_id, text):
 def send_voice(chat_id, audio_file):
 
     if not TOKEN:
+
         return False
 
     try:
 
-        with open(audio_file, "rb") as voice:
+        with open(
+            audio_file,
+            "rb"
+        ) as voice:
 
             response = requests.post(
+
                 f"{TELEGRAM_API}/sendVoice",
+
                 data={
                     "chat_id": chat_id
                 },
+
                 files={
-                    "voice": voice
+                    "voice": (
+                        "gh_boss_ai.mp3",
+                        voice,
+                        "audio/mpeg"
+                    )
                 },
+
                 timeout=60
             )
 
@@ -90,7 +128,11 @@ def send_voice(chat_id, audio_file):
 
     except Exception as e:
 
-        print("❌ Voice Send Error:", e)
+        print(
+            "❌ Voice Send Error:",
+            e
+        )
+
         return False
 
 
@@ -100,20 +142,32 @@ def send_voice(chat_id, audio_file):
 
 def download_telegram_file(file_id):
 
+    if not TOKEN:
+
+        return None
+
     try:
 
         result = requests.get(
+
             f"{TELEGRAM_API}/getFile",
+
             params={
                 "file_id": file_id
             },
+
             timeout=20
         )
 
         data = result.json()
 
         if not data.get("ok"):
-            print("❌ Telegram getFile error:", data)
+
+            print(
+                "❌ Telegram getFile error:",
+                data
+            )
+
             return None
 
         file_path = data["result"]["file_path"]
@@ -124,29 +178,46 @@ def download_telegram_file(file_id):
         )
 
         audio_response = requests.get(
+
             download_url,
+
             timeout=60
         )
 
         if not audio_response.ok:
+
             print(
                 "❌ Audio download failed:",
                 audio_response.status_code
             )
+
             return None
 
-        suffix = os.path.splitext(file_path)[1]
+        suffix = os.path.splitext(
+            file_path
+        )[1]
 
         if not suffix:
+
             suffix = ".ogg"
 
         temp = tempfile.NamedTemporaryFile(
+
             delete=False,
+
             suffix=suffix
         )
 
-        temp.write(audio_response.content)
+        temp.write(
+            audio_response.content
+        )
+
         temp.close()
+
+        print(
+            "✅ Voice file downloaded:",
+            temp.name
+        )
 
         return temp.name
 
@@ -161,7 +232,7 @@ def download_telegram_file(file_id):
 
 
 # ============================================================
-# GROQ VOICE → TEXT
+# GROQ WHISPER — VOICE → TEXT
 # ============================================================
 
 def transcribe_voice(audio_file):
@@ -175,7 +246,10 @@ def transcribe_voice(audio_file):
 
     try:
 
-        with open(audio_file, "rb") as audio:
+        with open(
+            audio_file,
+            "rb"
+        ) as audio:
 
             response = requests.post(
 
@@ -188,7 +262,9 @@ def transcribe_voice(audio_file):
 
                 files={
                     "file": (
-                        os.path.basename(audio_file),
+                        os.path.basename(
+                            audio_file
+                        ),
                         audio,
                         "audio/ogg"
                     )
@@ -212,7 +288,9 @@ def transcribe_voice(audio_file):
         if response.status_code != 200:
 
             return (
+
                 None,
+
                 "❌ Voice transcription failed\n\n"
                 + response.text[:1500]
             )
@@ -220,7 +298,10 @@ def transcribe_voice(audio_file):
         data = response.json()
 
         text = str(
-            data.get("text", "")
+            data.get(
+                "text",
+                ""
+            )
         ).strip()
 
         if not text:
@@ -230,7 +311,10 @@ def transcribe_voice(audio_file):
                 "❌ आवाज़ समझ नहीं आई।"
             )
 
-        return text, None
+        return (
+            text,
+            None
+        )
 
     except Exception as e:
 
@@ -240,49 +324,72 @@ def transcribe_voice(audio_file):
         )
 
         return (
+
             None,
+
             "❌ Voice AI Error\n\n"
             + str(e)
         )
 
 
 # ============================================================
-# TEXT → VOICE
+# EDGE TTS — TEXT → VOICE
 # ============================================================
 
 def text_to_voice(text):
 
     try:
 
-        from gtts import gTTS
+        text = str(
+            text
+        ).strip()
 
-        # Telegram voice को बहुत बड़ा होने से रोकना
-        text = str(text).strip()
+        if not text:
 
+            return None
+
+        # बहुत लंबा voice response न बनाएं
         if len(text) > 3000:
+
             text = text[:3000]
 
         temp = tempfile.NamedTemporaryFile(
+
             delete=False,
+
             suffix=".mp3"
         )
 
         temp.close()
 
-        tts = gTTS(
-            text=text,
-            lang="hi",
-            slow=False
+        async def generate_voice():
+
+            communicate = edge_tts.Communicate(
+
+                text,
+
+                "hi-IN-SwaraNeural"
+            )
+
+            await communicate.save(
+                temp.name
+            )
+
+        asyncio.run(
+            generate_voice()
         )
 
-        tts.save(temp.name)
+        print(
+            "✅ Edge TTS generated:",
+            temp.name
+        )
 
         return temp.name
 
     except Exception as e:
 
         print(
-            "❌ TTS Error:",
+            "❌ Edge TTS Error:",
             e
         )
 
@@ -293,7 +400,11 @@ def text_to_voice(text):
 # AI CHAT
 # ============================================================
 
-def ai_chat(chat_id, user_text, voice_reply=False):
+def ai_chat(
+    chat_id,
+    user_text,
+    voice_reply=False
+):
 
     print(
         "🧠 GH BOSS AI:",
@@ -316,9 +427,11 @@ User message:
 
 Understand the exact question.
 
-Normal conversation is allowed.
+NORMAL CONVERSATION:
+You can answer general questions normally.
 
-You can discuss cryptocurrencies including:
+CRYPTO:
+You can discuss:
 
 BTC
 ETH
@@ -328,7 +441,9 @@ ARCUSD
 If another cryptocurrency is mentioned,
 discuss that cryptocurrency too.
 
-For trading questions discuss when appropriate:
+TRADING ANALYSIS:
+
+When appropriate discuss:
 
 Direction
 Trend
@@ -342,36 +457,50 @@ Take Profit
 Risk/Reward
 Invalidation
 
-IMPORTANT:
+LIVE DATA RULE:
 
 Never invent a live price.
 
 If verified live market data is not supplied,
-clearly say that live price data is unavailable.
+clearly say:
 
-Do not pretend historical prices are current.
+"मेरे पास verified live market data उपलब्ध नहीं है।"
 
-Separate analysis from confirmed execution.
+Do not pretend old prices are current.
 
-Never place an order from normal AI chat.
+EXECUTION RULE:
 
-Trading execution remains under manual user control.
+Normal AI chat must NOT place an order.
+
+Do not claim that an order was placed.
+
+Do not claim an order was executed unless
+the actual trading engine confirms execution.
 
 Reply in Hindi unless the user uses another language.
 
-Be concise and useful.
+Keep the answer concise and useful.
+
+User has manual control over trading execution.
 """
 
-        answer = ask_groq(prompt)
+        answer = ask_groq(
+            prompt
+        )
 
-        answer = str(answer).strip()
+        answer = str(
+            answer
+        ).strip()
 
         if not answer:
 
-            answer = "AI ने कोई response नहीं दिया।"
+            answer = (
+                "AI ने कोई response नहीं दिया।"
+            )
+
 
         # ====================================================
-        # TEXT RESPONSE
+        # SEND TEXT
         # ====================================================
 
         remaining = answer
@@ -383,41 +512,59 @@ Be concise and useful.
             remaining = remaining[3900:]
 
             send_message(
+
                 chat_id,
-                "🧠 GH BOSS AI\n\n" + part
+
+                "🧠 GH BOSS AI\n\n"
+                + part
             )
 
         if remaining:
 
             send_message(
+
                 chat_id,
-                "🧠 GH BOSS AI\n\n" + remaining
+
+                "🧠 GH BOSS AI\n\n"
+                + remaining
             )
 
+
         # ====================================================
-        # VOICE RESPONSE
+        # SEND VOICE
         # ====================================================
 
         if voice_reply:
 
-            audio_file = text_to_voice(answer)
+            audio_file = text_to_voice(
+                answer
+            )
 
             if audio_file:
 
                 send_voice(
+
                     chat_id,
+
                     audio_file
                 )
 
                 try:
-                    os.remove(audio_file)
+
+                    os.remove(
+                        audio_file
+                    )
+
                 except:
+
                     pass
 
             else:
 
                 send_message(
+
                     chat_id,
+
                     "⚠️ Voice reply generate नहीं हो पाया।"
                 )
 
@@ -429,10 +576,121 @@ Be concise and useful.
         )
 
         send_message(
+
             chat_id,
+
             "❌ GROQ AI ERROR\n\n"
             + str(e)
         )
+
+
+# ============================================================
+# VOICE MESSAGE HANDLER
+# ============================================================
+
+def process_voice(
+    chat_id,
+    file_id
+):
+
+    print(
+        "🎤 VOICE MESSAGE RECEIVED"
+    )
+
+    send_message(
+
+        chat_id,
+
+        "🎤 Voice received...\n"
+        "🧠 GH BOSS AI सुन रहा है..."
+    )
+
+    audio_file = download_telegram_file(
+        file_id
+    )
+
+    if not audio_file:
+
+        send_message(
+
+            chat_id,
+
+            "❌ Voice file download नहीं हो पाई।"
+        )
+
+        return
+
+
+    try:
+
+        text, error = transcribe_voice(
+            audio_file
+        )
+
+        if error:
+
+            send_message(
+                chat_id,
+                error
+            )
+
+            return
+
+
+        print(
+            "🎤 TRANSCRIBED:",
+            text
+        )
+
+
+        # User ने क्या कहा
+        send_message(
+
+            chat_id,
+
+            "🎤 आपने कहा:\n\n"
+            + text
+        )
+
+
+        # AI response + voice
+        ai_chat(
+
+            chat_id,
+
+            text,
+
+            voice_reply=True
+        )
+
+
+    except Exception as e:
+
+        print(
+            "❌ VOICE PROCESS ERROR:",
+            e
+        )
+
+        send_message(
+
+            chat_id,
+
+            "❌ Voice processing error\n\n"
+            + str(e)
+        )
+
+
+    finally:
+
+        try:
+
+            os.remove(
+                audio_file
+            )
+
+        except:
+
+            pass
 
 
 # ============================================================
@@ -459,6 +717,7 @@ def command_start(chat_id):
         "आप text या voice दोनों में सवाल पूछ सकते हैं।\n\n"
 
         "Examples:\n"
+
         "BTC कैसा है?\n"
         "ETH analysis करो\n"
         "SOL trend बताओ\n"
@@ -474,7 +733,10 @@ def command_start(chat_id):
         "/ai\n"
         "/help\n\n"
 
-        "🎤 Voice → AI → 🔊 Voice\n"
+        "🎤 Voice → Groq Whisper\n"
+        "🧠 Groq AI\n"
+        "🔊 Edge TTS\n\n"
+
         "Trading Execution: MANUAL"
     )
 
@@ -488,6 +750,7 @@ def command_status(chat_id):
     try:
 
         status = get_engine_status()
+
         delta = test_delta()
 
         groq_ok = bool(
@@ -529,8 +792,11 @@ def command_status(chat_id):
     except Exception as e:
 
         send_message(
+
             chat_id,
-            "❌ STATUS ERROR\n\n" + str(e)
+
+            "❌ STATUS ERROR\n\n"
+            + str(e)
         )
 
 
@@ -541,7 +807,9 @@ def command_status(chat_id):
 def command_delta(chat_id):
 
     send_message(
+
         chat_id,
+
         "🔄 Testing Delta API..."
     )
 
@@ -556,6 +824,7 @@ def command_delta(chat_id):
                 chat_id,
 
                 "🟢 DELTA API OK\n\n"
+
                 "Authentication: OK\n"
                 "Connection: OK\n"
                 "Read-only test completed.\n"
@@ -569,6 +838,7 @@ def command_delta(chat_id):
                 chat_id,
 
                 "🔴 DELTA API ERROR\n\n"
+
                 + str(
                     result.get(
                         "error",
@@ -580,8 +850,11 @@ def command_delta(chat_id):
     except Exception as e:
 
         send_message(
+
             chat_id,
-            "❌ DELTA ERROR\n\n" + str(e)
+
+            "❌ DELTA ERROR\n\n"
+            + str(e)
         )
 
 
@@ -592,7 +865,9 @@ def command_delta(chat_id):
 def command_balance(chat_id):
 
     send_message(
+
         chat_id,
+
         "💰 Checking Delta balance..."
     )
 
@@ -607,6 +882,7 @@ def command_balance(chat_id):
                 chat_id,
 
                 "❌ BALANCE ERROR\n\n"
+
                 + str(
                     result.get(
                         "error",
@@ -617,18 +893,22 @@ def command_balance(chat_id):
 
             return
 
+
         send_message(
 
             chat_id,
 
             "💰 DELTA ACCOUNT\n\n"
+
             + str(result)
         )
 
     except Exception as e:
 
         send_message(
+
             chat_id,
+
             "❌ BALANCE ERROR\n\n"
             + str(e)
         )
@@ -676,7 +956,9 @@ def command_signal(chat_id):
     except Exception as e:
 
         send_message(
+
             chat_id,
+
             "❌ SIGNAL ERROR\n\n"
             + str(e)
         )
@@ -689,7 +971,9 @@ def command_signal(chat_id):
 def command_ai(chat_id):
 
     ai_chat(
+
         chat_id,
+
         "नमस्ते GH BOSS AI, सामान्य बातचीत शुरू करो।"
     )
 
@@ -733,98 +1017,38 @@ def command_help(chat_id):
         "🎤 VOICE AI\n"
         "━━━━━━━━━━━━━━\n\n"
 
-        "Voice message भेजें।\n"
-        "Bot उसे समझेगा और AI जवाब देगा।\n"
-        "फिर जवाब text + voice दोनों में मिलेगा।\n\n"
+        "Telegram में voice message भेजें।\n\n"
 
-        "━━━━━━━━━━━━━━\n"
-        "🤖 NORMAL CHAT\n"
-        "━━━━━━━━━━━━━━\n\n"
-
-        "BTC\n"
-        "ETH\n"
-        "SOL\n"
-        "ARCUSD\n\n"
+        "🎤 Voice\n"
+        "↓\n"
+        "🧠 Groq Whisper\n"
+        "↓\n"
+        "📝 Text\n"
+        "↓\n"
+        "🧠 GH BOSS AI\n"
+        "↓\n"
+        "🔊 Edge TTS\n\n"
 
         "AI: GROQ\n"
         "Voice STT: GROQ WHISPER\n"
-        "Voice TTS: gTTS\n"
-        "Gemini: REMOVED\n"
+        "Voice TTS: EDGE-TTS\n"
+        "Gemini: REMOVED\n\n"
+
         "Trading Execution: MANUAL"
     )
-
-
-# ============================================================
-# VOICE MESSAGE HANDLER
-# ============================================================
-
-def process_voice(chat_id, file_id):
-
-    send_message(
-        chat_id,
-        "🎤 Voice received...\n"
-        "🧠 GH BOSS AI सुन रहा है..."
-    )
-
-    audio_file = download_telegram_file(file_id)
-
-    if not audio_file:
-
-        send_message(
-            chat_id,
-            "❌ Voice file download नहीं हो पाई।"
-        )
-
-        return
-
-    try:
-
-        text, error = transcribe_voice(
-            audio_file
-        )
-
-        if error:
-
-            send_message(
-                chat_id,
-                error
-            )
-
-            return
-
-        print(
-            "🎤 TRANSCRIBED:",
-            text
-        )
-
-        send_message(
-            chat_id,
-            "🎤 आपने कहा:\n\n"
-            + text
-        )
-
-        # AI जवाब + voice
-        ai_chat(
-            chat_id,
-            text,
-            voice_reply=True
-        )
-
-    finally:
-
-        try:
-            os.remove(audio_file)
-        except:
-            pass
 
 
 # ============================================================
 # MAIN ROUTER
 # ============================================================
 
-def process_command(chat_id, command):
+def process_command(
+    chat_id,
+    command
+):
 
     if not command:
+
         return
 
     original_text = str(
@@ -832,17 +1056,24 @@ def process_command(chat_id, command):
     ).strip()
 
     if not original_text:
+
         return
 
     command_lower = (
         original_text.lower()
     )
 
+
     # /start@botname
     if (
+
         command_lower.startswith("/")
-        and "@"
+
+        and
+
+        "@"
         in command_lower
+
     ):
 
         command_lower = (
@@ -850,47 +1081,66 @@ def process_command(chat_id, command):
             .split("@")[0]
         )
 
+
     print(
         "🎯 TELEGRAM MESSAGE:",
         original_text
     )
 
+
     try:
 
         if command_lower == "/start":
 
-            command_start(chat_id)
+            command_start(
+                chat_id
+            )
 
         elif command_lower == "/status":
 
-            command_status(chat_id)
+            command_status(
+                chat_id
+            )
 
         elif command_lower == "/delta":
 
-            command_delta(chat_id)
+            command_delta(
+                chat_id
+            )
 
         elif command_lower == "/balance":
 
-            command_balance(chat_id)
+            command_balance(
+                chat_id
+            )
 
         elif command_lower == "/signal":
 
-            command_signal(chat_id)
+            command_signal(
+                chat_id
+            )
 
         elif command_lower == "/ai":
 
-            command_ai(chat_id)
+            command_ai(
+                chat_id
+            )
 
         elif command_lower == "/help":
 
-            command_help(chat_id)
+            command_help(
+                chat_id
+            )
 
         else:
 
             ai_chat(
+
                 chat_id,
+
                 original_text
             )
+
 
     except Exception as e:
 
