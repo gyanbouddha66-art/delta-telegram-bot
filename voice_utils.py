@@ -1,5 +1,5 @@
 # ============================================================
-# GH BOSS AI — VOICE UTILS (UPDATED & FIXED)
+# GH BOSS AI — VOICE UTILS
 # ============================================================
 
 import os
@@ -17,10 +17,6 @@ WHISPER_MODEL = "whisper-large-v3-turbo"
 EDGE_TTS_VOICE = "hi-IN-SwaraNeural"
 
 
-# ============================================================
-# VOICE STATUS (REQUIRED BY TELEGRAM BOT)
-# ============================================================
-
 def voice_status():
     return {
         "voice_input": bool(GROQ_API_KEY),
@@ -32,13 +28,8 @@ def voice_status():
     }
 
 
-# ============================================================
-# SEND TELEGRAM TEXT (WITH CHUNKING TO PREVENT LENGTH ERROR)
-# ============================================================
-
 def send_message(chat_id, text):
     if not TOKEN:
-        print("❌ TELEGRAM_BOT_TOKEN missing")
         return False
 
     try:
@@ -62,20 +53,14 @@ def send_message(chat_id, text):
                 timeout=20
             )
             return response.ok
-
     except Exception as e:
         print("❌ Telegram send error:", e)
         return False
 
 
-# ============================================================
-# SEND TELEGRAM VOICE
-# ============================================================
-
 def send_voice(chat_id, audio_file):
     if not TOKEN or not audio_file or not os.path.exists(audio_file):
         return False
-
     try:
         with open(audio_file, "rb") as voice:
             response = requests.post(
@@ -90,20 +75,11 @@ def send_voice(chat_id, audio_file):
         return False
 
 
-# ============================================================
-# DOWNLOAD TELEGRAM VOICE
-# ============================================================
-
 def download_telegram_file(file_id):
     if not TOKEN:
         return None
-
     try:
-        response = requests.get(
-            f"{TELEGRAM_API}/getFile",
-            params={"file_id": file_id},
-            timeout=20
-        )
+        response = requests.get(f"{TELEGRAM_API}/getFile", params={"file_id": file_id}, timeout=20)
         data = response.json()
         if not data.get("ok"):
             return None
@@ -120,91 +96,49 @@ def download_telegram_file(file_id):
         temp = tempfile.NamedTemporaryFile(delete=False, suffix=".ogg")
         temp.write(audio_response.content)
         temp.close()
-
-        print("🎤 Voice downloaded:", temp.name)
         return temp.name
-
     except Exception as e:
         print("❌ Telegram file error:", e)
         return None
 
 
-# ============================================================
-# GROQ WHISPER — VOICE TO TEXT (FIXED FORMAT)
-# ============================================================
-
 def transcribe_voice(audio_file):
-    if not GROQ_API_KEY:
-        return None, "❌ GROQ_API_KEY missing."
-
-    if not audio_file:
-        return None, "❌ Audio file missing."
+    if not GROQ_API_KEY or not audio_file:
+        return None, "❌ API Key or Audio missing."
 
     try:
         with open(audio_file, "rb") as audio:
             response = requests.post(
                 GROQ_TRANSCRIBE_URL,
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-                files={
-                    "file": (
-                        "voice.ogg",
-                        audio,
-                        "audio/ogg"
-                    )
-                },
-                data={
-                    "model": WHISPER_MODEL,
-                    "language": "hi",
-                    "response_format": "json"
-                },
+                files={"file": ("voice.ogg", audio, "audio/ogg")},
+                data={"model": WHISPER_MODEL, "language": "hi", "response_format": "json"},
                 timeout=120
             )
 
-        print("GROQ WHISPER STATUS:", response.status_code)
-
         if response.status_code != 200:
-            print("GROQ WHISPER ERROR:", response.text)
-            return None, "❌ Voice transcription failed\n\n" + response.text[:500]
+            return None, "❌ Transcription failed\n\n" + response.text[:500]
 
         data = response.json()
         text = str(data.get("text", "")).strip()
-
         if not text:
             return None, "❌ आवाज़ समझ नहीं आई।"
-
         return text, None
-
     except Exception as e:
-        print("❌ Whisper error:", e)
-        return None, "❌ Voice AI Error\n\n" + str(e)
+        return None, "❌ Whisper error\n\n" + str(e)
 
-
-# ============================================================
-# EDGE-TTS ASYNC
-# ============================================================
 
 async def _edge_tts_generate(text, output_file):
     import edge_tts
-    communicate = edge_tts.Communicate(
-        text=str(text),
-        voice=EDGE_TTS_VOICE,
-        rate="+0%",
-        volume="+0%",
-        pitch="+0Hz"
-    )
+    communicate = edge_tts.Communicate(text=str(text), voice=EDGE_TTS_VOICE)
     await communicate.save(output_file)
 
-
-# ============================================================
-# TEXT → VOICE
-# ============================================================
 
 def text_to_voice(text):
     try:
         text = str(text).strip()
         if not text:
             return None
-
         if len(text) > 3000:
             text = text[:3000]
 
@@ -223,24 +157,17 @@ def text_to_voice(text):
 
         if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
             return None
-
         return output_file
-
     except Exception as e:
         print("❌ Edge-TTS ERROR:", e)
         return None
 
 
-# ============================================================
-# COMPLETE VOICE PROCESS
-# ============================================================
-
 def process_voice(chat_id, file_id, ai_function):
     send_message(chat_id, "🎤 Voice received...\n🧠 GH BOSS AI सुन रहा है...")
-
     audio_file = download_telegram_file(file_id)
     if not audio_file:
-        send_message(chat_id, "❌ Voice file download नहीं हो पाई।")
+        send_message(chat_id, "❌ Voice download नहीं हो पाई।")
         return False
 
     try:
@@ -249,16 +176,11 @@ def process_voice(chat_id, file_id, ai_function):
             send_message(chat_id, error)
             return False
 
-        print("🎤 USER SAID:", text)
         send_message(chat_id, "🎤 आपने कहा:\n\n" + text)
-
         answer = ai_function(text)
-        answer = str(answer).strip()
-        if not answer:
-            answer = "AI ने कोई जवाब नहीं दिया।"
+        answer = str(answer).strip() or "AI ने कोई जवाब नहीं दिया।"
 
         send_message(chat_id, "🧠 GH BOSS AI\n\n" + answer)
-
         voice_file = text_to_voice(answer)
         if voice_file:
             send_voice(chat_id, voice_file)
@@ -266,16 +188,10 @@ def process_voice(chat_id, file_id, ai_function):
                 os.remove(voice_file)
             except Exception:
                 pass
-        else:
-            send_message(chat_id, "⚠️ Voice reply generate नहीं हो पाया।")
-
         return True
-
     except Exception as e:
-        print("❌ PROCESS VOICE ERROR:", e)
         send_message(chat_id, "❌ Voice processing error\n\n" + str(e))
         return False
-
     finally:
         try:
             if os.path.exists(audio_file):
