@@ -2,7 +2,7 @@ import os
 import requests
 
 from trading_engine import get_engine_status, get_signal
-from gemini_ai import ask_gemini
+from gemini_ai import ask_gemini, ask_gemini_chat, ask_gemini_analysis
 from delta_api import test_delta, get_delta_balances
 
 
@@ -10,7 +10,7 @@ from delta_api import test_delta, get_delta_balances
 # CONFIG
 # ============================================================
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 
 
 # ============================================================
@@ -25,10 +25,7 @@ def send_message(chat_id, text):
 
     try:
 
-        url = (
-            f"https://api.telegram.org/"
-            f"bot{TOKEN}/sendMessage"
-        )
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
 
         response = requests.post(
             url,
@@ -49,11 +46,7 @@ def send_message(chat_id, text):
 
     except Exception as e:
 
-        print(
-            "❌ Telegram send error:",
-            e
-        )
-
+        print("❌ Telegram send error:", e)
         return False
 
 
@@ -72,12 +65,14 @@ def command_start(chat_id):
         "✅ Gemini Module Loaded\n"
         "✅ Delta Module Loaded\n\n"
 
-        "Commands:\n\n"
+        "COMMANDS\n\n"
+
         "/status - System status\n"
         "/delta - Delta connection test\n"
         "/balance - Account balance\n"
         "/signal - Current signal\n"
-        "/ai - Ask Gemini\n"
+        "/ai - Normal Gemini Chat\n"
+        "/analyse - Crypto Analysis\n"
         "/help - Commands"
     )
 
@@ -91,29 +86,19 @@ def command_status(chat_id):
     try:
 
         status = get_engine_status()
-
         delta = test_delta()
 
-        delta_ok = (
-            delta.get("success", False)
-        )
+        delta_ok = delta.get("success", False)
 
         send_message(
             chat_id,
 
             "📊 GH BOSS STATUS\n\n"
 
-            f"Engine: "
-            f"{status.get('engine', 'UNKNOWN')}\n"
-
-            f"Mode: "
-            f"{status.get('mode', 'UNKNOWN')}\n"
-
-            f"Signal: "
-            f"{status.get('signal', 'NO SIGNAL')}\n"
-
-            f"Confidence: "
-            f"{status.get('confidence', 0)}%\n\n"
+            f"Engine: {status.get('engine', 'UNKNOWN')}\n"
+            f"Mode: {status.get('mode', 'UNKNOWN')}\n"
+            f"Signal: {status.get('signal', 'NO SIGNAL')}\n"
+            f"Confidence: {status.get('confidence', 0)}%\n\n"
 
             f"Delta: "
             f"{'CONNECTED 🟢' if delta_ok else 'ERROR 🔴'}\n"
@@ -268,27 +253,32 @@ def command_signal(chat_id):
 
 
 # ============================================================
-# GEMINI
+# NORMAL GEMINI CHAT
 # ============================================================
 
-def command_ai(chat_id):
+def command_ai(chat_id, user_text):
+
+    if not user_text:
+
+        send_message(
+            chat_id,
+            "🧠 Gemini से क्या पूछना है?\n\n"
+            "Example:\n"
+            "/ai नमस्ते BOSS\n"
+            "/ai BTC क्या है?\n"
+            "/ai मुझे trading समझाओ"
+        )
+
+        return
 
     send_message(
         chat_id,
-        "🧠 Gemini AI analyzing..."
+        "🧠 Gemini सोच रहा है..."
     )
 
     try:
 
-        answer = ask_gemini(
-
-            "You are GH BOSS AI. "
-            "Analyze the following request "
-            "professionally and answer in Hindi:\n\n"
-            "Explain the current trading system "
-            "status and what information is required "
-            "before making a market decision."
-        )
+        answer = ask_gemini_chat(user_text)
 
         answer = str(answer)
 
@@ -318,6 +308,41 @@ def command_ai(chat_id):
 
 
 # ============================================================
+# CRYPTO ANALYSIS
+# ============================================================
+
+def command_analyse(chat_id, symbol):
+
+    if not symbol:
+
+        send_message(
+            chat_id,
+
+            "📊 Crypto लिखें।\n\n"
+            "Examples:\n"
+            "/analyse ARCUSD\n"
+            "/analyse ETH\n"
+            "/analyse SOL\n"
+            "/analyse BTC"
+        )
+
+        return
+
+    symbol = symbol.upper()
+
+    # अभी market-data provider से data आने के लिए
+    # trading_engine का function बाद में जोड़ा जाएगा।
+
+    send_message(
+        chat_id,
+
+        f"🧠 GEMINI ANALYSIS\n\n"
+        f"Crypto: {symbol}\n\n"
+        "Live market-data connection next module में जोड़ा जाएगा।"
+    )
+
+
+# ============================================================
 # HELP
 # ============================================================
 
@@ -343,11 +368,17 @@ def command_help(chat_id):
         "/signal\n"
         "Current market signal\n\n"
 
-        "/ai\n"
-        "Gemini AI\n\n"
+        "/ai <message>\n"
+        "Normal Gemini conversation\n\n"
 
-        "/help\n"
-        "Commands"
+        "/analyse <crypto>\n"
+        "Gemini market analysis\n\n"
+
+        "Supported priority:\n"
+        "ARCUSD\n"
+        "ETH\n"
+        "SOL\n"
+        "BTC"
     )
 
 
@@ -360,38 +391,107 @@ def process_command(chat_id, command):
     if not command:
         return
 
-    command = command.strip().lower()
-
-    if "@" in command:
-
-        command = command.split("@")[0]
+    original = command.strip()
 
     print(
-        f"🎯 COMMAND RECEIVED: {command}"
+        f"🎯 COMMAND RECEIVED: {original}"
     )
+
+    # --------------------------------------------------------
+    # COMMAND + ARGUMENT
+    # --------------------------------------------------------
+
+    parts = original.split(maxsplit=1)
+
+    command_name = parts[0].lower()
+
+    argument = ""
+
+    if len(parts) > 1:
+        argument = parts[1].strip()
+
+    # /start@botname
+    if "@" in command_name:
+        command_name = command_name.split("@")[0]
 
     try:
 
-        if command == "/start":
+        # ----------------------------------------------------
+        # START
+        # ----------------------------------------------------
+
+        if command_name == "/start":
+
             command_start(chat_id)
 
-        elif command == "/status":
+        # ----------------------------------------------------
+        # STATUS
+        # ----------------------------------------------------
+
+        elif command_name == "/status":
+
             command_status(chat_id)
 
-        elif command == "/delta":
+        # ----------------------------------------------------
+        # DELTA
+        # ----------------------------------------------------
+
+        elif command_name == "/delta":
+
             command_delta(chat_id)
 
-        elif command == "/balance":
+        # ----------------------------------------------------
+        # BALANCE
+        # ----------------------------------------------------
+
+        elif command_name == "/balance":
+
             command_balance(chat_id)
 
-        elif command == "/signal":
+        # ----------------------------------------------------
+        # SIGNAL
+        # ----------------------------------------------------
+
+        elif command_name == "/signal":
+
             command_signal(chat_id)
 
-        elif command == "/ai":
-            command_ai(chat_id)
+        # ----------------------------------------------------
+        # GEMINI NORMAL CHAT
+        # ----------------------------------------------------
 
-        elif command == "/help":
+        elif command_name == "/ai":
+
+            command_ai(
+                chat_id,
+                argument
+            )
+
+        # ----------------------------------------------------
+        # CRYPTO ANALYSIS
+        # ----------------------------------------------------
+
+        elif command_name in [
+            "/analyse",
+            "/analysis"
+        ]:
+
+            command_analyse(
+                chat_id,
+                argument
+            )
+
+        # ----------------------------------------------------
+        # HELP
+        # ----------------------------------------------------
+
+        elif command_name == "/help":
+
             command_help(chat_id)
+
+        # ----------------------------------------------------
+        # UNKNOWN
+        # ----------------------------------------------------
 
         else:
 
