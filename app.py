@@ -4,14 +4,18 @@ import time
 import threading
 import requests
 
-from telegram_bot import process_command, process_voice
+from telegram_bot import (
+    process_command,
+    process_voice
+)
+
 from delta_api import test_delta
 
 
 # ============================================================
 # GH BOSS AI — APP
-# GROQ + TELEGRAM + DELTA + VOICE
-# GEMINI REMOVED
+# TELEGRAM + GROQ + DELTA + VOICE
+# SINGLE POLLING WORKER
 # ============================================================
 
 app = Flask(__name__)
@@ -38,61 +42,57 @@ GROQ_API_KEY = os.getenv(
 
 
 # ============================================================
+# GLOBAL POLLING LOCK
+# ============================================================
+
+_polling_started = False
+_polling_lock = threading.Lock()
+
+
+# ============================================================
 # TELEGRAM SEND
 # ============================================================
 
 def telegram_send(text, chat_id=None):
 
+    token = os.getenv(
+        "TELEGRAM_BOT_TOKEN",
+        ""
+    ).strip()
+
+    target_chat = (
+        chat_id
+        if chat_id is not None
+        else TELEGRAM_CHAT_ID
+    )
+
+    if not token:
+        print("❌ TELEGRAM_BOT_TOKEN missing")
+        return False
+
+    if not target_chat:
+        print("❌ TELEGRAM_CHAT_ID missing")
+        return False
+
     try:
-
-        token = os.getenv(
-            "TELEGRAM_BOT_TOKEN",
-            ""
-        ).strip()
-
-        target_chat = (
-            chat_id
-            if chat_id is not None
-            else TELEGRAM_CHAT_ID
-        )
-
-        if not token:
-
-            print(
-                "❌ TELEGRAM_BOT_TOKEN missing"
-            )
-
-            return False
-
-        if not target_chat:
-
-            print(
-                "❌ TELEGRAM_CHAT_ID missing"
-            )
-
-            return False
-
-        url = (
-            f"https://api.telegram.org/"
-            f"bot{token}/sendMessage"
-        )
 
         response = requests.post(
 
-            url,
+            f"https://api.telegram.org/"
+            f"bot{token}/sendMessage",
 
             json={
                 "chat_id": target_chat,
                 "text": str(text)
             },
 
-            timeout=15
+            timeout=20
         )
 
         print(
             "Telegram SEND:",
             response.status_code,
-            response.text[:500]
+            response.text[:300]
         )
 
         return response.ok
@@ -113,18 +113,6 @@ def telegram_send(text, chat_id=None):
 
 def telegram_connection_test():
 
-    print(
-        "=========================================="
-    )
-
-    print(
-        "TELEGRAM CONNECTION TEST"
-    )
-
-    print(
-        "=========================================="
-    )
-
     token = os.getenv(
         "TELEGRAM_BOT_TOKEN",
         ""
@@ -140,57 +128,47 @@ def telegram_connection_test():
 
     try:
 
-        url = (
-            f"https://api.telegram.org/"
-            f"bot{token}/getMe"
-        )
-
         response = requests.get(
-            url,
+
+            f"https://api.telegram.org/"
+            f"bot{token}/getMe",
+
             timeout=20
         )
 
         print(
-            "Telegram getMe status:",
+            "Telegram getMe:",
             response.status_code
         )
 
-        if response.ok:
+        if not response.ok:
+            return False
 
-            data = response.json()
+        data = response.json()
 
-            if data.get("ok"):
+        if not data.get("ok"):
+            return False
 
-                bot = data.get(
-                    "result",
-                    {}
-                )
-
-                print(
-                    "✅ BOT CONNECTED"
-                )
-
-                print(
-                    "BOT USERNAME:",
-                    bot.get("username")
-                )
-
-                return True
-
-        print(
-            "❌ BOT CONNECTION FAILED"
+        bot = data.get(
+            "result",
+            {}
         )
 
         print(
-            response.text[:500]
+            "✅ TELEGRAM CONNECTED"
         )
 
-        return False
+        print(
+            "BOT:",
+            bot.get("username")
+        )
+
+        return True
 
     except Exception as e:
 
         print(
-            "❌ TELEGRAM TEST ERROR:",
+            "❌ TELEGRAM CONNECTION ERROR:",
             e
         )
 
@@ -198,7 +176,7 @@ def telegram_connection_test():
 
 
 # ============================================================
-# REMOVE WEBHOOK
+# DELETE WEBHOOK
 # ============================================================
 
 def remove_webhook():
@@ -209,19 +187,14 @@ def remove_webhook():
     ).strip()
 
     if not token:
-
         return False
 
     try:
 
-        url = (
-            f"https://api.telegram.org/"
-            f"bot{token}/deleteWebhook"
-        )
-
         response = requests.get(
 
-            url,
+            f"https://api.telegram.org/"
+            f"bot{token}/deleteWebhook",
 
             params={
                 "drop_pending_updates": False
@@ -235,16 +208,12 @@ def remove_webhook():
             response.status_code
         )
 
-        print(
-            response.text[:500]
-        )
-
         return response.ok
 
     except Exception as e:
 
         print(
-            "Webhook removal error:",
+            "❌ WEBHOOK ERROR:",
             e
         )
 
@@ -253,7 +222,6 @@ def remove_webhook():
 
 # ============================================================
 # TELEGRAM POLLING
-# TEXT + VOICE
 # ============================================================
 
 def telegram_polling():
@@ -281,11 +249,6 @@ def telegram_polling():
 
         try:
 
-            url = (
-                f"https://api.telegram.org/"
-                f"bot{token}/getUpdates"
-            )
-
             params = {
                 "timeout": 30
             }
@@ -296,7 +259,8 @@ def telegram_polling():
 
             response = requests.get(
 
-                url,
+                f"https://api.telegram.org/"
+                f"bot{token}/getUpdates",
 
                 params=params,
 
@@ -312,7 +276,21 @@ def telegram_polling():
                     data
                 )
 
-                time.sleep(5)
+                # 409 के बाद थोड़ी देर रुकें
+                if data.get(
+                    "error_code"
+                ) == 409:
+
+                    print(
+                        "⚠️ Another polling process "
+                        "is using this bot token."
+                    )
+
+                    time.sleep(10)
+
+                else:
+
+                    time.sleep(5)
 
                 continue
 
@@ -323,36 +301,20 @@ def telegram_polling():
 
             for update in updates:
 
-                # ============================================
-                # UPDATE OFFSET
-                # ============================================
-
-                offset = (
-                    update.get(
-                        "update_id",
-                        0
-                    ) + 1
+                update_id = update.get(
+                    "update_id"
                 )
 
-                print(
-                    "🔥 TELEGRAM UPDATE RECEIVED"
-                )
+                if update_id is not None:
 
-                # ============================================
-                # MESSAGE
-                # ============================================
+                    offset = update_id + 1
 
                 message = update.get(
                     "message"
                 )
 
                 if not message:
-
                     continue
-
-                # ============================================
-                # CHAT
-                # ============================================
 
                 chat = message.get(
                     "chat",
@@ -364,17 +326,11 @@ def telegram_polling():
                 )
 
                 if not chat_id:
-
                     continue
 
-                print(
-                    "👤 CHAT ID:",
-                    chat_id
-                )
-
-                # ============================================
+                # ====================================================
                 # CHAT SECURITY
-                # ============================================
+                # ====================================================
 
                 if (
 
@@ -395,9 +351,9 @@ def telegram_polling():
 
                     continue
 
-                # ============================================
+                # ====================================================
                 # VOICE MESSAGE
-                # ============================================
+                # ====================================================
 
                 voice = message.get(
                     "voice"
@@ -409,77 +365,50 @@ def telegram_polling():
                         "file_id"
                     )
 
-                    if not file_id:
+                    if file_id:
 
                         print(
-                            "❌ Voice file_id missing"
+                            "🎤 VOICE RECEIVED"
                         )
 
-                        telegram_send(
+                        try:
 
-                            "❌ Voice file नहीं मिला।",
+                            process_voice(
+                                chat_id,
+                                file_id
+                            )
 
-                            chat_id
-                        )
+                        except Exception as e:
 
-                        continue
+                            print(
+                                "❌ VOICE ERROR:",
+                                e
+                            )
 
-                    print(
-                        "🎤 VOICE MESSAGE RECEIVED"
-                    )
-
-                    print(
-                        "🎤 FILE ID:",
-                        file_id
-                    )
-
-                    try:
-
-                        result = process_voice(
-
-                            chat_id,
-
-                            file_id
-
-                        )
-
-                        print(
-                            "VOICE RESULT:",
-                            result
-                        )
-
-                    except Exception as e:
-
-                        print(
-                            "❌ process_voice ERROR:",
-                            e
-                        )
-
-                        telegram_send(
-
-                            "❌ Voice processing error:\n"
-                            + str(e),
-
-                            chat_id
-                        )
+                            telegram_send(
+                                "❌ Voice processing error\n\n"
+                                + str(e),
+                                chat_id
+                            )
 
                     continue
 
-                # ============================================
+                # ====================================================
                 # TEXT MESSAGE
-                # ============================================
+                # ====================================================
 
                 text = message.get(
-                    "text",
-                    ""
+                    "text"
                 )
+
+                if text is None:
+                    continue
 
                 text = str(
                     text
                 ).strip()
 
                 if not text:
-
                     continue
 
                 print(
@@ -487,16 +416,10 @@ def telegram_polling():
                     text
                 )
 
-                # ============================================
-                # PROCESS TEXT COMMAND
-                # ============================================
-
                 try:
 
                     result = process_command(
-
                         chat_id,
-
                         text
                     )
 
@@ -508,22 +431,20 @@ def telegram_polling():
                 except Exception as e:
 
                     print(
-                        "❌ process_command ERROR:",
+                        "❌ COMMAND ERROR:",
                         e
                     )
 
                     telegram_send(
-
                         "❌ Command processing error:\n"
                         + str(e),
-
                         chat_id
                     )
 
         except requests.exceptions.Timeout:
 
             print(
-                "⏱️ Telegram polling timeout - retrying"
+                "⏱️ Telegram polling timeout"
             )
 
             continue
@@ -531,11 +452,48 @@ def telegram_polling():
         except Exception as e:
 
             print(
-                "❌ TELEGRAM POLLING ERROR:",
+                "❌ POLLING ERROR:",
                 e
             )
 
             time.sleep(5)
+
+
+# ============================================================
+# START POLLING ONLY ONCE
+# ============================================================
+
+def start_telegram_polling():
+
+    global _polling_started
+
+    with _polling_lock:
+
+        if _polling_started:
+
+            print(
+                "⚠️ Telegram polling already started"
+            )
+
+            return
+
+        _polling_started = True
+
+    thread = threading.Thread(
+
+        target=telegram_polling,
+
+        daemon=True,
+
+        name="TelegramPolling"
+
+    )
+
+    thread.start()
+
+    print(
+        "✅ Telegram polling thread started"
+    )
 
 
 # ============================================================
@@ -557,38 +515,21 @@ def home():
         (
             "CONFIGURED"
             if TELEGRAM_BOT_TOKEN
-            else
-            "MISSING"
+            else "MISSING"
         ),
 
         "telegram_mode":
         "POLLING",
 
-        "text_chat":
-        "ENABLED",
-
-        "voice_input":
-        "ENABLED",
-
-        "voice_reply":
+        "voice":
         "ENABLED",
 
         "ai":
         (
             "GROQ"
             if GROQ_API_KEY
-            else
-            "GROQ KEY MISSING"
+            else "GROQ KEY MISSING"
         ),
-
-        "voice_stt":
-        "GROQ WHISPER",
-
-        "voice_tts":
-        "EDGE-TTS",
-
-        "gemini":
-        "REMOVED",
 
         "delta":
         (
@@ -604,7 +545,10 @@ def home():
             )
             else
             "MISSING"
-        )
+        ),
+
+        "execution":
+        "CONFIRMATION REQUIRED"
 
     })
 
@@ -622,28 +566,19 @@ def health():
         "OK",
 
         "telegram_polling":
-        True,
+        _polling_started,
 
-        "text_chat":
-        True,
-
-        "voice_input":
-        True,
-
-        "voice_reply":
+        "voice":
         True,
 
         "ai":
         "GROQ",
 
-        "voice_stt":
-        "GROQ WHISPER",
+        "delta":
+        True,
 
-        "voice_tts":
-        "EDGE-TTS",
-
-        "gemini":
-        False
+        "execution":
+        "CONFIRMATION REQUIRED"
 
     })
 
@@ -684,9 +619,6 @@ def status():
             ).strip()
         ),
 
-        "gemini":
-        False,
-
         "delta_key":
         bool(
             os.getenv(
@@ -703,23 +635,20 @@ def status():
             ).strip()
         ),
 
-        "telegram_mode":
-        "POLLING",
-
-        "text_chat":
-        "ENABLED",
+        "telegram_polling":
+        _polling_started,
 
         "voice_input":
-        "ENABLED",
+        True,
 
         "voice_reply":
-        "ENABLED",
+        True,
 
-        "voice_stt":
-        "GROQ WHISPER",
+        "gemini":
+        False,
 
-        "voice_tts":
-        "EDGE-TTS"
+        "execution":
+        "CONFIRMATION REQUIRED"
 
     })
 
@@ -743,7 +672,7 @@ def delta_test():
 
         return jsonify({
 
-            "ok":
+            "success":
             False,
 
             "error":
@@ -762,9 +691,7 @@ def my_ip():
     try:
 
         response = requests.get(
-
             "https://api.ipify.org",
-
             timeout=10
         )
 
@@ -786,81 +713,51 @@ def my_ip():
 
 
 # ============================================================
-# START BACKGROUND SERVICES
+# START TELEGRAM
 # ============================================================
 
 def start_background_services():
 
     print(
-        "🚀 STARTING BACKGROUND SERVICES"
+        "=========================================="
     )
 
-    # ========================================
-    # REMOVE WEBHOOK
-    # ========================================
+    print(
+        "🚀 GH BOSS AI STARTING"
+    )
+
+    print(
+        "=========================================="
+    )
 
     remove_webhook()
 
-    # ========================================
-    # TELEGRAM CONNECTION TEST
-    # ========================================
-
     telegram_connection_test()
 
-    # ========================================
-    # TELEGRAM POLLING THREAD
-    # ========================================
-
-    telegram_thread = threading.Thread(
-
-        target=telegram_polling,
-
-        daemon=True,
-
-        name="TelegramPolling"
-
-    )
-
-    telegram_thread.start()
-
-    print(
-        "✅ Telegram thread started"
-    )
-
-    print(
-        "🎤 Voice input enabled"
-    )
-
-    print(
-        "🔊 Voice reply enabled"
-    )
+    start_telegram_polling()
 
 
 # ============================================================
-# START SERVICES
+# START
 # ============================================================
 
 start_background_services()
 
 
 # ============================================================
-# LOCAL SERVER
+# LOCAL / RENDER SERVER
 # ============================================================
 
 if __name__ == "__main__":
 
     port = int(
-
         os.environ.get(
             "PORT",
             10000
         )
-
     )
 
     app.run(
-
         host="0.0.0.0",
-
         port=port
     )
