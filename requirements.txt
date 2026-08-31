@@ -4,3 +4,9 @@ requests
 google-genai
 ccxt
 streamlit
+
+# Voice Input
+pydub
+
+# Voice Output
+gTTS
