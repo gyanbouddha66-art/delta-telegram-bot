@@ -9,7 +9,9 @@ from delta_api import test_delta
 
 
 # ============================================================
-# APP
+# GH BOSS AI — APP
+# GEMINI REMOVED
+# GROQ + TELEGRAM + DELTA
 # ============================================================
 
 app = Flask(__name__)
@@ -22,12 +24,17 @@ app = Flask(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv(
     "TELEGRAM_BOT_TOKEN",
     ""
-)
+).strip()
 
 TELEGRAM_CHAT_ID = os.getenv(
     "TELEGRAM_CHAT_ID",
     ""
-)
+).strip()
+
+GROQ_API_KEY = os.getenv(
+    "GROQ_API_KEY",
+    ""
+).strip()
 
 
 # ============================================================
@@ -41,7 +48,7 @@ def telegram_send(text, chat_id=None):
         token = os.getenv(
             "TELEGRAM_BOT_TOKEN",
             ""
-        )
+        ).strip()
 
         target_chat = (
             chat_id
@@ -76,7 +83,7 @@ def telegram_send(text, chat_id=None):
 
             json={
                 "chat_id": target_chat,
-                "text": text
+                "text": str(text)
             },
 
             timeout=15
@@ -85,7 +92,7 @@ def telegram_send(text, chat_id=None):
         print(
             "Telegram SEND:",
             response.status_code,
-            response.text
+            response.text[:500]
         )
 
         return response.ok
@@ -93,7 +100,7 @@ def telegram_send(text, chat_id=None):
     except Exception as e:
 
         print(
-            "❌ Telegram SEND ERROR:",
+            "❌ TELEGRAM SEND ERROR:",
             e
         )
 
@@ -101,7 +108,7 @@ def telegram_send(text, chat_id=None):
 
 
 # ============================================================
-# TELEGRAM BOT INFORMATION TEST
+# TELEGRAM CONNECTION TEST
 # ============================================================
 
 def telegram_connection_test():
@@ -121,7 +128,7 @@ def telegram_connection_test():
     token = os.getenv(
         "TELEGRAM_BOT_TOKEN",
         ""
-    )
+    ).strip()
 
     if not token:
 
@@ -146,11 +153,6 @@ def telegram_connection_test():
         print(
             "Telegram getMe status:",
             response.status_code
-        )
-
-        print(
-            "Telegram getMe response:",
-            response.text
         )
 
         if response.ok:
@@ -192,7 +194,7 @@ def telegram_connection_test():
 
 
 # ============================================================
-# REMOVE OLD WEBHOOK
+# REMOVE WEBHOOK
 # ============================================================
 
 def remove_webhook():
@@ -200,7 +202,7 @@ def remove_webhook():
     token = os.getenv(
         "TELEGRAM_BOT_TOKEN",
         ""
-    )
+    ).strip()
 
     if not token:
 
@@ -230,7 +232,7 @@ def remove_webhook():
         )
 
         print(
-            response.text
+            response.text[:500]
         )
 
         return response.ok
@@ -254,7 +256,7 @@ def telegram_polling():
     token = os.getenv(
         "TELEGRAM_BOT_TOKEN",
         ""
-    )
+    ).strip()
 
     if not token:
 
@@ -327,10 +329,6 @@ def telegram_polling():
                     "🔥 TELEGRAM UPDATE RECEIVED"
                 )
 
-                print(
-                    update
-                )
-
                 message = update.get(
                     "message"
                 )
@@ -351,7 +349,9 @@ def telegram_polling():
                 text = message.get(
                     "text",
                     ""
-                ).strip()
+                )
+
+                text = str(text).strip()
 
                 if not chat_id:
 
@@ -371,9 +371,9 @@ def telegram_polling():
                     chat_id
                 )
 
-                # --------------------------------------------
+                # ====================================================
                 # CHAT ID SECURITY
-                # --------------------------------------------
+                # ====================================================
 
                 if (
 
@@ -394,9 +394,9 @@ def telegram_polling():
 
                     continue
 
-                # --------------------------------------------
-                # COMMAND PROCESSOR
-                # --------------------------------------------
+                # ====================================================
+                # PROCESS MESSAGE
+                # ====================================================
 
                 try:
 
@@ -454,34 +454,46 @@ def home():
 
     return jsonify({
 
-        "system": "GH AI TRADING",
+        "system":
+        "GH BOSS AI TRADING",
 
-        "status": "ONLINE",
+        "status":
+        "ONLINE",
 
-        "telegram": (
+        "telegram":
+        (
             "CONFIGURED"
             if TELEGRAM_BOT_TOKEN
             else "MISSING"
         ),
 
-        "telegram_mode": "POLLING",
+        "telegram_mode":
+        "POLLING",
 
-        "gemini": (
-            "CONFIGURED"
-            if os.getenv(
-                "GEMINI_API_KEY"
-            )
-            else "MISSING"
+        "ai":
+        (
+            "GROQ"
+            if GROQ_API_KEY
+            else "GROQ KEY MISSING"
         ),
 
-        "delta": (
+        "gemini":
+        "REMOVED",
+
+        "delta":
+        (
             "CONFIGURED"
             if (
-                os.getenv("DELTA_API_KEY")
+                os.getenv(
+                    "DELTA_API_KEY"
+                )
                 and
-                os.getenv("DELTA_API_SECRET")
+                os.getenv(
+                    "DELTA_API_SECRET"
+                )
             )
-            else "MISSING"
+            else
+            "MISSING"
         )
 
     })
@@ -496,9 +508,17 @@ def health():
 
     return jsonify({
 
-        "status": "OK",
+        "status":
+        "OK",
 
-        "telegram_polling": True
+        "telegram_polling":
+        True,
+
+        "ai":
+        "GROQ",
+
+        "gemini":
+        False
 
     })
 
@@ -512,39 +532,54 @@ def status():
 
     return jsonify({
 
-        "server": "ONLINE",
+        "server":
+        "ONLINE",
 
-        "telegram_token": bool(
+        "telegram_token":
+        bool(
             os.getenv(
-                "TELEGRAM_BOT_TOKEN"
-            )
+                "TELEGRAM_BOT_TOKEN",
+                ""
+            ).strip()
         ),
 
-        "telegram_chat_id": bool(
+        "telegram_chat_id":
+        bool(
             os.getenv(
-                "TELEGRAM_CHAT_ID"
-            )
+                "TELEGRAM_CHAT_ID",
+                ""
+            ).strip()
         ),
 
-        "gemini": bool(
+        "groq_api_key":
+        bool(
             os.getenv(
-                "GEMINI_API_KEY"
-            )
+                "GROQ_API_KEY",
+                ""
+            ).strip()
         ),
 
-        "delta_key": bool(
+        "gemini":
+        False,
+
+        "delta_key":
+        bool(
             os.getenv(
-                "DELTA_API_KEY"
-            )
+                "DELTA_API_KEY",
+                ""
+            ).strip()
         ),
 
-        "delta_secret": bool(
+        "delta_secret":
+        bool(
             os.getenv(
-                "DELTA_API_SECRET"
-            )
+                "DELTA_API_SECRET",
+                ""
+            ).strip()
         ),
 
-        "telegram_mode": "POLLING"
+        "telegram_mode":
+        "POLLING"
 
     })
 
@@ -560,15 +595,19 @@ def delta_test():
 
         result = test_delta()
 
-        return jsonify(result), 200
+        return jsonify(
+            result
+        ), 200
 
     except Exception as e:
 
         return jsonify({
 
-            "ok": False,
+            "ok":
+            False,
 
-            "error": str(e)
+            "error":
+            str(e)
 
         }), 500
 
@@ -600,13 +639,14 @@ def my_ip():
 
         return jsonify({
 
-            "error": str(e)
+            "error":
+            str(e)
 
         }), 500
 
 
 # ============================================================
-# START TELEGRAM POLLING
+# START BACKGROUND SERVICES
 # ============================================================
 
 def start_background_services():
@@ -615,9 +655,21 @@ def start_background_services():
         "🚀 STARTING BACKGROUND SERVICES"
     )
 
-    # --------------------------------------------
-    # TELEGRAM
-    # --------------------------------------------
+    # --------------------------------------------------------
+    # REMOVE WEBHOOK BEFORE POLLING
+    # --------------------------------------------------------
+
+    remove_webhook()
+
+    # --------------------------------------------------------
+    # TELEGRAM CONNECTION
+    # --------------------------------------------------------
+
+    telegram_connection_test()
+
+    # --------------------------------------------------------
+    # TELEGRAM POLLING
+    # --------------------------------------------------------
 
     telegram_thread = threading.Thread(
 
@@ -637,7 +689,7 @@ def start_background_services():
 
 
 # ============================================================
-# START SERVICES WHEN GUNICORN IMPORTS APP
+# START SERVICES
 # ============================================================
 
 start_background_services()
