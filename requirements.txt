@@ -4,3 +4,4 @@ requests
 ccxt
 streamlit
 edge-tts
+python-telegram-bot
