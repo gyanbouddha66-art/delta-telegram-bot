@@ -58,7 +58,6 @@ def ask_groq(prompt):
                             "Be concise and useful."
                         )
                     },
-
                     {
                         "role": "user",
                         "content": str(prompt)
@@ -72,10 +71,7 @@ def ask_groq(prompt):
             timeout=45
         )
 
-        print(
-            "GROQ STATUS:",
-            response.status_code
-        )
+        print("GROQ STATUS:", response.status_code)
 
         if response.status_code != 200:
 
@@ -95,7 +91,6 @@ def ask_groq(prompt):
         choices = data.get("choices", [])
 
         if not choices:
-
             return (
                 "❌ GROQ ERROR\n\n"
                 "No response returned."
@@ -108,13 +103,37 @@ def ask_groq(prompt):
         )
 
         if not answer:
-
             return (
                 "❌ GROQ ERROR\n\n"
                 "Empty AI response."
             )
 
         return str(answer).strip()
+
+    except requests.exceptions.Timeout:
+
+        return (
+            "❌ GROQ ERROR\n\n"
+            "Groq API request timeout."
+        )
+
+    except requests.exceptions.RequestException as e:
+
+        print("GROQ REQUEST ERROR:", e)
+
+        return (
+            "❌ GROQ CONNECTION ERROR\n\n"
+            f"{str(e)}"
+        )
+
+    except Exception as e:
+
+        print("GROQ ERROR:", e)
+
+        return (
+            "❌ GROQ ERROR\n\n"
+            f"{str(e)}"
+        )
 
 
 # ============================================================
