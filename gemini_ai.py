@@ -1,51 +1,57 @@
+# gemini_ai.py
+
 import os
 import requests
 
-
 # ============================================================
-# GH GEMINI 3.6 FLASH — INTERACTIONS API
+# GH BOSS AI — GEMINI MODULE
 # ============================================================
 
-API_KEY = os.getenv(
-    "GEMINI_API_KEY",
-    ""
-).strip()
+API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+
+MODEL = "gemini-3.6-flash"
 
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/"
-    "v1beta/interactions"
+    f"v1beta/models/{MODEL}:generateContent"
 )
 
 
 # ============================================================
-# ASK GEMINI
+# GEMINI REQUEST
 # ============================================================
 
 def ask_gemini(prompt):
 
     if not API_KEY:
         return (
-            "GEMINI ERROR\n\n"
-            "GEMINI_API_KEY is missing."
+            "❌ GEMINI ERROR\n\n"
+            "GEMINI_API_KEY Render Environment "
+            "Variables में नहीं मिली।"
         )
 
-    if "\n" in API_KEY or "\r" in API_KEY:
-        return (
-            "GEMINI ERROR\n\n"
-            "GEMINI_API_KEY contains newline."
-        )
+    # accidental newline / whitespace protection
+    clean_prompt = str(prompt).strip()
 
-    if not prompt:
-        prompt = "Explain the current question clearly."
+    if not clean_prompt:
+        return "भाई, अपना सवाल लिखो।"
 
     payload = {
-        "model": "gemini-3.6-flash",
-        "input": str(prompt)
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": clean_prompt
+                    }
+                ]
+            }
+        ]
     }
 
     headers = {
-        "x-goog-api-key": API_KEY,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-goog-api-key": API_KEY
     }
 
     try:
@@ -57,100 +63,203 @@ def ask_gemini(prompt):
             timeout=60
         )
 
-        print(
-            "GEMINI HTTP:",
-            response.status_code
-        )
+        # ----------------------------------------------------
+        # API ERROR
+        # ----------------------------------------------------
 
         if response.status_code != 200:
 
-            print(
-                "GEMINI RESPONSE:",
-                response.text[:3000]
-            )
-
             return (
-                "GEMINI API ERROR\n\n"
-                "HTTP STATUS: "
-                + str(response.status_code)
-                + "\n\n"
-                + response.text[:3000]
+                "❌ GEMINI API ERROR\n\n"
+                f"HTTP STATUS: {response.status_code}\n\n"
+                f"{response.text[:3000]}"
             )
 
         data = response.json()
 
         # ----------------------------------------------------
-        # INTERACTIONS API OUTPUT
+        # RESPONSE
         # ----------------------------------------------------
 
-        steps = data.get(
-            "steps",
+        candidates = data.get("candidates", [])
+
+        if not candidates:
+            return (
+                "❌ GEMINI ERROR\n\n"
+                "Gemini ने कोई response नहीं दिया.\n\n"
+                + str(data)[:2000]
+            )
+
+        content = candidates[0].get(
+            "content",
+            {}
+        )
+
+        parts = content.get(
+            "parts",
             []
         )
 
-        texts = []
+        if not parts:
+            return "❌ GEMINI ERROR\nNo response parts."
 
-        for step in steps:
+        text = parts[0].get(
+            "text",
+            ""
+        )
 
-            if step.get("type") != "model_output":
-                continue
+        if not text:
+            return "❌ GEMINI ERROR\nEmpty response."
 
-            content = step.get(
-                "content",
-                []
-            )
+        return text.strip()
 
-            for item in content:
-
-                if item.get("type") == "text":
-
-                    text = item.get(
-                        "text",
-                        ""
-                    )
-
-                    if text:
-                        texts.append(
-                            text
-                        )
-
-        answer = "\n".join(
-            texts
-        ).strip()
-
-        if answer:
-            return answer
+    except requests.exceptions.Timeout:
 
         return (
-            "GEMINI ERROR\n\n"
-            "No text output returned.\n\n"
-            + str(data)[:3000]
+            "❌ GEMINI CONNECTION ERROR\n\n"
+            "Gemini response timeout."
         )
 
     except requests.exceptions.RequestException as e:
 
-        print(
-            "GEMINI CONNECTION ERROR:",
-            repr(e)
-        )
-
         return (
-            "GEMINI CONNECTION ERROR\n\n"
+            "❌ GEMINI CONNECTION ERROR\n\n"
             + str(e)
         )
 
     except Exception as e:
 
-        print(
-            "GEMINI ERROR:",
-            repr(e)
+        return (
+            "❌ GEMINI ERROR\n\n"
+            f"TYPE: {type(e).__name__}\n"
+            f"MESSAGE: {str(e)}"
         )
 
-        return (
-            "GEMINI ERROR\n\n"
-            "TYPE: "
-            + type(e).__name__
-            + "\n\n"
-            "MESSAGE: "
-            + str(e)
-        )
+
+# ============================================================
+# NORMAL GH BOSS CHAT
+# ============================================================
+
+def ask_gemini_chat(user_message):
+
+    prompt = f"""
+You are GH BOSS AI.
+
+You are a professional AI assistant created for the user.
+
+Speak naturally in Hindi/Hinglish unless the user asks
+for another language.
+
+You can discuss:
+- normal questions
+- technology
+- crypto
+- trading
+- market concepts
+- coding
+- research
+
+Do NOT pretend that you have live market data unless it is
+actually supplied to you.
+
+USER MESSAGE:
+{user_message}
+
+Give a direct, useful and natural answer.
+"""
+
+    return ask_gemini(prompt)
+
+
+# ============================================================
+# CRYPTO ANALYSIS
+# ============================================================
+
+def ask_gemini_analysis(symbol, market_data):
+
+    prompt = f"""
+You are GH BOSS AI, the market-analysis brain.
+
+CRYPTO:
+{symbol}
+
+IMPORTANT:
+Analyze ONLY the market data supplied below.
+Do not invent live prices, volume, indicators,
+news or order-book information.
+
+MARKET DATA:
+{market_data}
+
+Analyze:
+
+1. Market direction
+2. Trend
+3. Price structure
+4. Momentum
+5. Volume
+6. Volatility
+7. Support
+8. Resistance
+9. Bullish scenario
+10. Bearish scenario
+11. Risk
+12. Possible trading setup
+
+If the data does not justify a trade, clearly say:
+
+NO TRADE
+
+If a setup is justified, provide:
+
+DECISION:
+BUY / SELL / NO TRADE
+
+ENTRY:
+...
+
+STOP LOSS:
+...
+
+TAKE PROFIT:
+...
+
+INVALIDATION:
+...
+
+CONFIDENCE:
+0-100%
+
+REASON:
+...
+
+Do not claim certainty.
+Do not fabricate missing data.
+Return a clear professional analysis in Hindi.
+"""
+
+    return ask_gemini(prompt)
+
+
+# ============================================================
+# GEMINI CONNECTION TEST
+# ============================================================
+
+def test_gemini():
+
+    result = ask_gemini(
+        "Reply only: GH GEMINI CONNECTION OK"
+    )
+
+    if "GH GEMINI CONNECTION OK" in result:
+        return {
+            "success": True,
+            "model": MODEL,
+            "message": result
+        }
+
+    return {
+        "success": False,
+        "model": MODEL,
+        "error": result
+    }
