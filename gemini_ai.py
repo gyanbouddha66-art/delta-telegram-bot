@@ -1,10 +1,8 @@
-# gemini_ai.py
-
 import os
 import requests
 
 # ============================================================
-# GH BOSS AI — GEMINI MODULE
+# GH BOSS AI — NORMAL CHAT GEMINI
 # ============================================================
 
 API_KEY = os.getenv("GEMINI_API_KEY", "").strip()
@@ -18,23 +16,18 @@ GEMINI_URL = (
 
 
 # ============================================================
-# GEMINI REQUEST
+# CORE GEMINI
 # ============================================================
 
 def ask_gemini(prompt):
 
     if not API_KEY:
-        return (
-            "❌ GEMINI ERROR\n\n"
-            "GEMINI_API_KEY Render Environment "
-            "Variables में नहीं मिली।"
-        )
+        return "❌ GEMINI ERROR\nGEMINI_API_KEY missing."
 
-    # accidental newline / whitespace protection
-    clean_prompt = str(prompt).strip()
+    prompt = str(prompt).strip()
 
-    if not clean_prompt:
-        return "भाई, अपना सवाल लिखो।"
+    if not prompt:
+        return "भाई, क्या पूछना है लिखो।"
 
     payload = {
         "contents": [
@@ -42,7 +35,7 @@ def ask_gemini(prompt):
                 "role": "user",
                 "parts": [
                     {
-                        "text": clean_prompt
+                        "text": prompt
                     }
                 ]
             }
@@ -63,81 +56,54 @@ def ask_gemini(prompt):
             timeout=60
         )
 
-        # ----------------------------------------------------
-        # API ERROR
-        # ----------------------------------------------------
-
         if response.status_code != 200:
-
             return (
                 "❌ GEMINI API ERROR\n\n"
-                f"HTTP STATUS: {response.status_code}\n\n"
+                f"HTTP: {response.status_code}\n\n"
                 f"{response.text[:3000]}"
             )
 
         data = response.json()
 
-        # ----------------------------------------------------
-        # RESPONSE
-        # ----------------------------------------------------
-
         candidates = data.get("candidates", [])
 
         if not candidates:
             return (
-                "❌ GEMINI ERROR\n\n"
-                "Gemini ने कोई response नहीं दिया.\n\n"
-                + str(data)[:2000]
+                "❌ GEMINI ERROR\n"
+                "No response returned."
             )
 
-        content = candidates[0].get(
-            "content",
-            {}
-        )
-
-        parts = content.get(
-            "parts",
-            []
+        parts = (
+            candidates[0]
+            .get("content", {})
+            .get("parts", [])
         )
 
         if not parts:
-            return "❌ GEMINI ERROR\nNo response parts."
-
-        text = parts[0].get(
-            "text",
-            ""
-        )
-
-        if not text:
             return "❌ GEMINI ERROR\nEmpty response."
 
-        return text.strip()
+        answer = parts[0].get("text", "")
+
+        if not answer:
+            return "❌ GEMINI ERROR\nEmpty Gemini text."
+
+        return answer.strip()
 
     except requests.exceptions.Timeout:
-
-        return (
-            "❌ GEMINI CONNECTION ERROR\n\n"
-            "Gemini response timeout."
-        )
+        return "❌ GEMINI TIMEOUT\nGemini ने समय पर जवाब नहीं दिया।"
 
     except requests.exceptions.RequestException as e:
-
-        return (
-            "❌ GEMINI CONNECTION ERROR\n\n"
-            + str(e)
-        )
+        return f"❌ GEMINI CONNECTION ERROR\n{e}"
 
     except Exception as e:
-
         return (
-            "❌ GEMINI ERROR\n\n"
-            f"TYPE: {type(e).__name__}\n"
-            f"MESSAGE: {str(e)}"
+            "❌ GEMINI ERROR\n"
+            f"{type(e).__name__}: {e}"
         )
 
 
 # ============================================================
-# NORMAL GH BOSS CHAT
+# NORMAL CHAT
 # ============================================================
 
 def ask_gemini_chat(user_message):
@@ -145,27 +111,30 @@ def ask_gemini_chat(user_message):
     prompt = f"""
 You are GH BOSS AI.
 
-You are a professional AI assistant created for the user.
+You are a natural conversational AI assistant.
 
-Speak naturally in Hindi/Hinglish unless the user asks
-for another language.
+The user can talk to you normally about anything.
 
-You can discuss:
-- normal questions
-- technology
-- crypto
-- trading
-- market concepts
-- coding
-- research
+Rules:
 
-Do NOT pretend that you have live market data unless it is
-actually supplied to you.
+- Understand the user's actual message.
+- Answer the actual question.
+- Do not repeat a fixed answer.
+- Do not assume every message is about trading.
+- If the user asks a normal question, answer normally.
+- If the user asks about crypto, discuss crypto.
+- If the user asks about trading, discuss trading.
+- If the user asks for market analysis, explain that live
+  market data is required before claiming a live analysis.
+- Never pretend that data is live when it was not supplied.
+- Speak naturally in Hindi/Hinglish.
+- Be concise but useful.
 
 USER MESSAGE:
+
 {user_message}
 
-Give a direct, useful and natural answer.
+Now answer the user's actual message.
 """
 
     return ask_gemini(prompt)
@@ -178,39 +147,32 @@ Give a direct, useful and natural answer.
 def ask_gemini_analysis(symbol, market_data):
 
     prompt = f"""
-You are GH BOSS AI, the market-analysis brain.
+You are GH BOSS AI.
+
+Perform a professional crypto market analysis.
 
 CRYPTO:
 {symbol}
 
-IMPORTANT:
-Analyze ONLY the market data supplied below.
-Do not invent live prices, volume, indicators,
-news or order-book information.
-
-MARKET DATA:
+REAL MARKET DATA:
 {market_data}
 
-Analyze:
+Analyze the supplied data.
 
-1. Market direction
-2. Trend
-3. Price structure
-4. Momentum
-5. Volume
-6. Volatility
-7. Support
-8. Resistance
-9. Bullish scenario
-10. Bearish scenario
-11. Risk
-12. Possible trading setup
+Cover:
 
-If the data does not justify a trade, clearly say:
+Trend
+Market Structure
+Momentum
+Volume
+Volatility
+Support
+Resistance
+Bullish Scenario
+Bearish Scenario
+Risk
 
-NO TRADE
-
-If a setup is justified, provide:
+Then give:
 
 DECISION:
 BUY / SELL / NO TRADE
@@ -233,33 +195,30 @@ CONFIDENCE:
 REASON:
 ...
 
+IMPORTANT:
+
+Only use the supplied market data.
+Do not invent prices or indicators.
 Do not claim certainty.
-Do not fabricate missing data.
-Return a clear professional analysis in Hindi.
+
+Answer in Hindi/Hinglish.
 """
 
     return ask_gemini(prompt)
 
 
 # ============================================================
-# GEMINI CONNECTION TEST
+# CONNECTION TEST
 # ============================================================
 
 def test_gemini():
 
     result = ask_gemini(
-        "Reply only: GH GEMINI CONNECTION OK"
+        "Reply only with: GH GEMINI CONNECTION OK"
     )
 
-    if "GH GEMINI CONNECTION OK" in result:
-        return {
-            "success": True,
-            "model": MODEL,
-            "message": result
-        }
-
     return {
-        "success": False,
+        "success": "GH GEMINI CONNECTION OK" in result,
         "model": MODEL,
-        "error": result
+        "response": result
     }
