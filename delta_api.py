@@ -1,453 +1,76 @@
-import os
-import time
-import hmac
-import hashlib
-import json
-import requests
+M
+My Workspace
+
+
+My project
+
+Production
+
+delta-telegram-bot
+
+Your free instance will spin down with inactivity, which can delay requests by 50 seconds or more.
+Upgrade now
+Newer logs may be unavailable because a recent deploy failed. View recent events.
+
+Application logs
+Search
+Search logs
+
+Last hour
+
+
+
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "/opt/render/project/src/app.py", line 7, in <module>
+    from telegram_bot import (
+  File "/opt/render/project/src/telegram_bot.py", line 3, in <module>
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+ModuleNotFoundError: No module named 'telegram'
+==> Exited with status 1
+==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
+==> Running 'gunicorn app:app --workers 1 --threads 2 --timeout 120'
+127.0.0.1 - - [31/Aug/2026:22:54:11 +0000] "HEAD / HTTP/1.1" 200 0 "https://delta-telegram-bot-agg7.onrender.com" "Mozilla/5.0+(compatible; UptimeRobot/2.0; http://www.uptimerobot.com/)"
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'gunicorn app:app --workers 1 --threads 2 --timeout 120'
+Traceback (most recent call last):
+  File "/opt/render/project/src/.venv/bin/gunicorn", line 8, in <module>
+    sys.exit(run())
+  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/wsgiapp.py", line 66, in run
+    WSGIApplication("%(prog)s [OPTIONS] [APP_MODULE]", prog=prog).run()
+  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/base.py", line 235, in run
+    super().run()
+  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/base.py", line 71, in run
+    Arbiter(self).run()
+  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/arbiter.py", line 63, in __init__
+    self.setup(app)
+  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/arbiter.py", line 164, in setup
+    self.app.wsgi()
+  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/base.py", line 66, in wsgi
+    self.callable = self.load()
+  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/wsgiapp.py", line 57, in load
+    return self.load_wsgiapp()
+  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/wsgiapp.py", line 47, in load_wsgiapp
+    return util.import_app(self.app_uri)
+  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/util.py", line 420, in import_app
+    mod = importlib.import_module(module)
+  File "/opt/render/project/python/Python-3.10.11/lib/python3.10/importlib/__init__.py", line 126, in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+  File "<frozen importlib._bootstrap>", line 1050, in _gcd_import
+  File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
+  File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
+  File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
+  File "<frozen importlib._bootstrap_external>", line 883, in exec_module
+  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+  File "/opt/render/project/src/app.py", line 7, in <module>
+    from telegram_bot import (
+  File "/opt/render/project/src/telegram_bot.py", line 7, in <module>
+    from delta_api import test_delta, get_delta_balances, place_order
+ImportError: cannot import name 'place_order' from 'delta_api' (/opt/render/project/src/delta_api.py)
+==> Exited with status 1
+==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
+==> Running 'gunicorn app:app --workers 1 --threads 2 --timeout 120'
+0 services selected:
+
+Move
 
-
-# ============================================================
-# GH DELTA API
-# REAL TRADING
-# ============================================================
-
-BASE_URL = "https://api.india.delta.exchange"
-
-
-# ============================================================
-# AUTH SIGNATURE
-# ============================================================
-
-def _credentials():
-
-    api_key = os.getenv("DELTA_API_KEY", "").strip()
-    api_secret = os.getenv("DELTA_API_SECRET", "").strip()
-
-    if not api_key or not api_secret:
-        return None, None
-
-    return api_key, api_secret
-
-
-def _request(
-    method,
-    path,
-    params=None,
-    body=None,
-    authenticated=False
-):
-
-    params = params or {}
-    body = body or {}
-
-    query_string = ""
-
-    if params:
-
-        query_string = "?" + "&".join(
-            f"{k}={v}"
-            for k, v in params.items()
-        )
-
-    payload = ""
-
-    if body:
-
-        payload = json.dumps(
-            body,
-            separators=(",", ":")
-        )
-
-    timestamp = str(int(time.time()))
-
-    if authenticated:
-
-        api_key, api_secret = _credentials()
-
-        if not api_key or not api_secret:
-
-            return {
-                "success": False,
-                "error": "Delta credentials missing"
-            }
-
-        signature_data = (
-            method.upper()
-            + timestamp
-            + path
-            + query_string
-            + payload
-        )
-
-        signature = hmac.new(
-            api_secret.encode("utf-8"),
-            signature_data.encode("utf-8"),
-            hashlib.sha256
-        ).hexdigest()
-
-        headers = {
-            "api-key": api_key,
-            "timestamp": timestamp,
-            "signature": signature,
-            "User-Agent": "GH-Delta-Trading-Bot",
-            "Accept": "application/json",
-            "Content-Type": "application/json"
-        }
-
-    else:
-
-        headers = {
-            "User-Agent": "GH-Delta-Trading-Bot",
-            "Accept": "application/json",
-            "Content-Type": "application/json"
-        }
-
-    try:
-
-        response = requests.request(
-            method.upper(),
-            BASE_URL + path,
-            params=params,
-            data=payload,
-            headers=headers,
-            timeout=30
-        )
-
-        try:
-            data = response.json()
-        except:
-            data = {
-                "raw": response.text
-            }
-
-        if not response.ok:
-
-            return {
-                "success": False,
-                "http_status": response.status_code,
-                "error": data
-            }
-
-        return data
-
-    except Exception as e:
-
-        return {
-            "success": False,
-            "error": str(e)
-        }
-
-
-# ============================================================
-# LIVE PRICE
-# ============================================================
-
-def get_live_price(symbol):
-
-    result = _request(
-        "GET",
-        f"/v2/tickers/{symbol}"
-    )
-
-    if not result.get("success"):
-
-        return {
-            "success": False,
-            "error": result.get("error")
-        }
-
-    ticker = result.get(
-        "result",
-        {}
-    )
-
-    price = (
-        ticker.get("close")
-        or ticker.get("mark_price")
-        or ticker.get("spot_price")
-    )
-
-    if price is None:
-
-        return {
-            "success": False,
-            "error": "Live price unavailable"
-        }
-
-    return {
-        "success": True,
-        "symbol": symbol,
-        "price": float(price),
-        "ticker": ticker
-    }
-
-
-# ============================================================
-# PRODUCT
-# ============================================================
-
-def get_product(symbol):
-
-    result = _request(
-        "GET",
-        f"/v2/products/{symbol}"
-    )
-
-    if not result.get("success"):
-
-        return {
-            "success": False,
-            "error": result.get("error")
-        }
-
-    product = result.get(
-        "result",
-        {}
-    )
-
-    return {
-        "success": True,
-        "product": product
-    }
-
-
-# ============================================================
-# CANDLES
-# ============================================================
-
-def get_candles(
-    symbol,
-    timeframe="1m",
-    limit=200
-):
-
-    timeframe = str(timeframe).lower()
-
-    minutes_map = {
-        "1m": 1,
-        "3m": 3,
-        "5m": 5,
-        "15m": 15,
-        "30m": 30,
-        "1h": 60,
-        "2h": 120,
-        "4h": 240,
-        "6h": 360,
-        "1d": 1440
-    }
-
-    if timeframe not in minutes_map:
-
-        return {
-            "success": False,
-            "error": f"Unsupported timeframe: {timeframe}"
-        }
-
-    minutes = minutes_map[timeframe]
-
-    end = int(time.time())
-
-    start = end - (
-        minutes * 60 * (limit + 10)
-    )
-
-    result = _request(
-        "GET",
-        "/v2/history/candles",
-        params={
-            "resolution": timeframe,
-            "symbol": symbol,
-            "start": start,
-            "end": end
-        }
-    )
-
-    if not result.get("success"):
-
-        return {
-            "success": False,
-            "error": result.get("error")
-        }
-
-    candles = result.get(
-        "result",
-        []
-    )
-
-    candles = sorted(
-        candles,
-        key=lambda x: x.get("time", 0)
-    )
-
-    if len(candles) > limit:
-
-        candles = candles[-limit:]
-
-    return {
-        "success": True,
-        "candles": candles
-    }
-
-
-# ============================================================
-# BALANCE
-# ============================================================
-
-def get_delta_balances():
-
-    result = _request(
-        "GET",
-        "/v2/wallet/balances",
-        authenticated=True
-    )
-
-    if not result.get("success", False):
-
-        return result
-
-    balances = result.get(
-        "result",
-        []
-    )
-
-    return {
-        "success": True,
-        "http_status": 200,
-        "balances": balances
-    }
-
-
-# ============================================================
-# CURRENT POSITION
-# ============================================================
-
-def get_position(product_id):
-
-    result = _request(
-        "GET",
-        "/v2/positions",
-        params={
-            "product_id": product_id
-        },
-        authenticated=True
-    )
-
-    if not result.get("success"):
-
-        return result
-
-    position = result.get(
-        "result",
-        {}
-    )
-
-    return {
-        "success": True,
-        "position": position,
-        "size": float(
-            position.get("size", 0) or 0
-        )
-    }
-
-
-# ============================================================
-# PLACE REAL MARKET ORDER
-# ============================================================
-
-def place_market_order(
-    symbol,
-    side,
-    size,
-    stop_loss=None,
-    take_profit=None
-):
-
-    side = str(side).lower()
-
-    if side not in ("buy", "sell"):
-
-        return {
-            "success": False,
-            "error": "Side must be buy or sell"
-        }
-
-    if float(size) <= 0:
-
-        return {
-            "success": False,
-            "error": "Order size must be greater than zero"
-        }
-
-    product_result = get_product(symbol)
-
-    if not product_result.get("success"):
-
-        return product_result
-
-    product = product_result["product"]
-
-    product_id = product.get("id")
-
-    if not product_id:
-
-        return {
-            "success": False,
-            "error": "Product ID unavailable"
-        }
-
-    body = {
-        "product_id": int(product_id),
-        "product_symbol": symbol,
-        "size": int(size),
-        "side": side,
-        "order_type": "market_order"
-    }
-
-    # ========================================================
-    # BRACKET TP / SL
-    # ========================================================
-
-    if stop_loss is not None:
-
-        body[
-            "bracket_stop_loss_price"
-        ] = str(stop_loss)
-
-    if take_profit is not None:
-
-        body[
-            "bracket_take_profit_price"
-        ] = str(take_profit)
-
-    body[
-        "bracket_stop_trigger_method"
-    ] = "last_traded_price"
-
-    result = _request(
-        "POST",
-        "/v2/orders",
-        body=body,
-        authenticated=True
-    )
-
-    return result
-
-
-# ============================================================
-# TEST DELTA AUTH
-# ============================================================
-
-def test_delta():
-
-    result = get_delta_balances()
-
-    if result.get("success"):
-
-        return {
-            "success": True,
-            "stage": "authenticated_request",
-            "http_status": 200,
-            "message": "Delta authentication OK"
-        }
-
-    return result
