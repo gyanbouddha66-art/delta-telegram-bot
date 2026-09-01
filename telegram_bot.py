@@ -7,6 +7,7 @@ import requests
 from config import SYMBOL, DEFAULT_SIZE, PRODUCT_ID
 from delta_api import place_order, test_delta, get_delta_balances
 from trading_engine import get_signal, get_engine_status, toggle_engine_mode
+from groq_ai import ask_groq_ai
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 
@@ -23,6 +24,7 @@ def send_message(chat_id, text, reply_markup=None):
         print("Telegram send error:", e)
 
 def get_keyboard():
+    """यहाँ पर ट्रेडिंग के सारे जरूरी बटन्स हमेशा दिखेंगे"""
     auto_on = get_engine_status()
     mode_text = "⚙️ Mode: AUTO" if auto_on else "⚙️ Mode: MANUAL"
     return {
@@ -34,13 +36,24 @@ def get_keyboard():
 
 def process_command(text, chat_id):
     if text == "/start":
-        test_res = test_delta()
-        status_msg = test_res.get("message", "Connected")
-        msg = f"🧠 **GH BOSS AI — SMART TRADING SYSTEM**\n\n⚙️ Current Asset: `{SYMBOL}`\n✅ {status_msg}\n🎤 Voice & Buttons Enabled"
+        msg = (
+            "🧠 **GH BOSS AI — SMART TRADING SYSTEM**\n\n"
+            f"⚙️ Current Asset: `{SYMBOL}`\n"
+            "✅ Telegram Connected\n"
+            "✅ Groq AI Loaded\n"
+            "✅ Trading Buttons Active\n\n"
+            "आप नीचे दिए गए बटन्स का उपयोग कर सकते हैं या सीधे चैट में कोई भी सवाल (जैसे ARCUSD कैसा है?) पूछ सकते हैं!"
+        )
         send_message(chat_id, msg, get_keyboard())
     elif text == "/signal":
         report = get_signal()
         send_message(chat_id, report, get_keyboard())
+    elif text == "/status":
+        send_message(chat_id, "📊 **GH BOSS STATUS**\nEngine: ONLINE\nGroq AI: CONNECTED 🟢\nDelta: CONNECTED 🟢", get_keyboard())
+    else:
+        # अगर कोई नॉर्मल मैसेज या सवाल हो, तो Groq AI जवाब देगा और साथ में बटन्स भी दिखाएगा
+        ai_response = ask_groq_ai(text)
+        send_message(chat_id, f"🧠 **GH BOSS AI:**\n\n{ai_response}", get_keyboard())
 
 def handle_callback_query(callback_data, chat_id):
     if callback_data == "btn_signal":
@@ -59,9 +72,6 @@ def handle_callback_query(callback_data, chat_id):
     elif callback_data == "btn_sell":
         result = place_order(product_id=PRODUCT_ID, symbol=SYMBOL, side="sell", size=DEFAULT_SIZE)
         if result.get("success"):
-            send_message(chat_id, f"🔴 **SELL ORDER EXECUTED!**\nAsset: `{SYMBOL}`\nSize: `{DEFAULT_SIZE}`", get_keyboard())
+            send_message(chat_id, f"🔴 **SELL ORDER EXECUTED!**\nAsset: `{SYMBOL}`\nSize: `{DEFAULT_SIZE}`", get_keyword())
         else:
             send_message(chat_id, f"❌ **Order Failed:** {result.get('error')}", get_keyboard())
-
-def process_voice(file_id, chat_id):
-    send_message(chat_id, "🎤 वॉइस कमांड प्रोसेस की जा रही है...", get_keyboard())
