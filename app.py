@@ -11,16 +11,21 @@ app = Flask(__name__)
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 
-# सर्वर शुरू होते ही ऑटोमैटिक Webhook सेट करने का फंक्शन
-def set_webhook_automatically():
-    render_url = os.getenv("RENDER_EXTERNAL_URL", "").strip()
-    if TOKEN and render_url:
-        try:
-            webhook_url = f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={render_url}"
-            res = requests.get(webhook_url, timeout=10)
-            print("🤖 Auto Webhook Setup Response:", res.text)
-        except Exception as e:
-            print("❌ Auto Webhook Error:", e)
+# 1. ब्राउज़र से एक क्लिक में वेबहुक सेट करने का राउट
+@app.route("/setwebhook", methods=["GET"])
+def set_webhook():
+    if not TOKEN:
+        return "❌ TELEGRAM_BOT_TOKEN is missing in Environment Variables!", 400
+    
+    # Render का लाइव URL अपने आप ले लेगा
+    render_url = request.host_url.rstrip('/')
+    
+    webhook_url = f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={render_url}"
+    try:
+        res = requests.get(webhook_url, timeout=10)
+        return f"🟢 Webhook Response: {res.text} <br> 🔗 Set URL: {render_url}"
+    except Exception as e:
+        return f"❌ Error setting webhook: {str(e)}", 500
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -30,7 +35,7 @@ def index():
             if not data:
                 return "OK", 200
 
-            # 1. बटन क्लिक हैंडल करने के लिए
+            # बटन क्लिक हैंडल करने के लिए
             if "callback_query" in data:
                 cq = data["callback_query"]
                 chat_id = cq["message"]["chat"]["id"]
@@ -38,7 +43,7 @@ def index():
                 handle_callback_query(chat_id, callback_data)
                 return "OK", 200
 
-            # 2. मैसेज या कमांड हैंडल करने के लिए
+            # मैसेज या कमांड हैंडल करने के लिए
             if "message" in data:
                 msg = data["message"]
                 chat_id = msg["chat"]["id"]
@@ -59,8 +64,5 @@ def index():
 
 
 if __name__ == "__main__":
-    # ऐप चालू होने से पहले ऑटोमैटिक वेबहुक सेट करें
-    set_webhook_automatically()
-    
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
