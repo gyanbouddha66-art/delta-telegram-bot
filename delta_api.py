@@ -1,5 +1,5 @@
 # ============================================================
-# GH BOSS AI — DELTA API MODULE (`delta_api.py`)
+# DELTA API MODULE (`delta_api.py`)
 # ============================================================
 
 import os
@@ -8,11 +8,11 @@ import time
 import hmac
 import hashlib
 import json
+from config import SYMBOL, PRODUCT_ID
 
 API_KEY = os.getenv("DELTA_API_KEY", "").strip()
 API_SECRET = os.getenv("DELTA_API_SECRET", "").strip()
 BASE_URL = "https://api.delta.exchange"
-DEFAULT_SYMBOL = "ARCUSD"
 
 
 def generate_signature(method, endpoint, payload_str=""):
@@ -28,7 +28,7 @@ def generate_signature(method, endpoint, payload_str=""):
     return timestamp, signature
 
 
-def get_live_price(symbol=DEFAULT_SYMBOL):
+def get_live_price(symbol=SYMBOL):
     try:
         url = f"{BASE_URL}/v2/products"
         res = requests.get(url, timeout=10)
@@ -43,7 +43,7 @@ def get_live_price(symbol=DEFAULT_SYMBOL):
         return 0.0
 
 
-def get_candles(symbol=DEFAULT_SYMBOL, resolution="15m", limit=50):
+def get_candles(symbol=SYMBOL, resolution="15m", limit=50):
     try:
         url = f"{BASE_URL}/v2/history/candles"
         params = {"symbol": symbol, "resolution": resolution, "limit": limit}
@@ -56,7 +56,7 @@ def get_candles(symbol=DEFAULT_SYMBOL, resolution="15m", limit=50):
         return []
 
 
-def place_order(product_id=27, symbol=DEFAULT_SYMBOL, side="buy", size=1, order_type="market"):
+def place_order(product_id=PRODUCT_ID, symbol=SYMBOL, side="buy", size=1, order_type="market"):
     if not API_KEY or not API_SECRET:
         return {"success": False, "error": "API Keys missing."}
     try:
@@ -84,3 +84,15 @@ def place_order(product_id=27, symbol=DEFAULT_SYMBOL, side="buy", size=1, order_
             return {"success": False, "error": response.text}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def test_delta():
+    """डेल्टा एपीआई कनेक्शन और प्राइस चेक करने के लिए"""
+    try:
+        price = get_live_price(SYMBOL)
+        if price > 0:
+            return {"success": True, "message": f"Delta API Connected. {SYMBOL} Price: {price}"}
+        else:
+            return {"success": False, "message": "Connected, but price returned 0."}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
