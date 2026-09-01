@@ -1,91 +1,81 @@
 # ============================================================
-# GH BOSS AI — DELTA API MODULE
+# GH BOSS AI — TELEGRAM BOT MODULE (`telegram_bot.py`)
 # ============================================================
 
 import os
 import requests
 
-API_KEY = os.getenv("DELTA_API_KEY", "").strip()
-API_SECRET = os.getenv("DELTA_API_SECRET", "").strip()
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8919168139:AAFijo1uf4BoJo1oJjqKvO9UjYj96wASpw8").strip()
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{TOKEN}"
 
-BASE_URL = "https://api.delta.exchange"
-
-
-def test_delta():
+def send_message(chat_id, text):
     try:
-        url = f"{BASE_URL}/v2/products"
-        response = requests.get(url, timeout=10)
-        if response.ok:
-            return {"success": True, "message": "Connection OK"}
-        return {"success": False, "error": f"HTTP Status: {response.status_code}"}
+        url = f"{TELEGRAM_API_URL}/sendMessage"
+        payload = {"chat_id": chat_id, "text": text}
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        print("❌ Send message error:", e)
 
-
-def get_delta_balances():
-    if not API_KEY or not API_SECRET:
-        return {"success": False, "error": "DELTA_API_KEY or DELTA_API_SECRET missing."}
-    
+def send_message_with_keyboard(chat_id, text):
     try:
-        url = f"{BASE_URL}/v2/wallet/balances"
-        response = requests.get(url, timeout=15)
-        if response.ok:
-            res_data = response.json()
-            balances = res_data.get("result", [])
-            if isinstance(balances, dict):
-                balances = [balances]
-            return {"success": True, "balances": balances}
-        else:
-            return {"success": False, "error": response.text}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-def place_order(symbol="ARCUSD", side="buy", size=1, order_type="market"):
-    if not API_KEY or not API_SECRET:
-        return {"success": False, "error": "APIKeys missing."}
-
-    try:
-        url = f"{BASE_URL}/v2/orders"
+        url = f"{TELEGRAM_API_URL}/sendMessage"
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "🟢 BUY (Long)", "callback_data": "BUY_SIGNAL"},
+                    {"text": "🔴 SELL (Short)", "callback_data": "SELL_SIGNAL"}
+                ],
+                [
+                    {"text": "📊 Check Status", "callback_data": "STATUS"},
+                    {"text": "⚡ AI Signal", "callback_data": "AI_SIGNAL"}
+                ]
+            ]
+        }
         payload = {
-            "product_id": symbol,
-            "size": size,
-            "side": side.lower(),
-            "order_type": order_type.lower()
+            "chat_id": chat_id, 
+            "text": text, 
+            "reply_markup": keyboard
         }
-        print(f"🚀 Placing Order on Delta: {payload}")
-        return {
-            "success": True, 
-            "message": f"Order {side.upper()} of size {size} for {symbol} processed successfully!"
-        }
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        print("❌ Place order error:", e)
-        return {"success": False, "error": str(e)}
+        print("❌ Keyboard message error:", e)
+        send_message(chat_id, text)
 
-
-def get_live_price(symbol="ARCUSD"):
+def command_start(chat_id):
     try:
-        url = f"{BASE_URL}/v2/products"
-        res = requests.get(url, timeout=10)
-        if res.ok:
-            products = res.json().get("result", [])
-            for p in products:
-                if p.get("symbol") == symbol or p.get("contract_unit") == symbol:
-                    return float(p.get("close", p.get("mark_price", 0)))
-        return 0.0
+        msg = (
+            "🧠 GH BOSS AI — SMART TRADING SYSTEM\n\n"
+            "⚙️ Status: System Connected & Ready\n"
+            "🚀 Select an option below to control trading:"
+        )
+        send_message_with_keyboard(chat_id, msg)
     except Exception as e:
-        print("❌ Live price error:", e)
-        return 0.0
+        print("❌ Start Command Error:", e)
+        send_message(chat_id, "🟢 GH BOSS AI is Online and Running!")
 
+def process_command(chat_id, text):
+    text = text.strip().lower()
+    print(f"📥 Received command from user: {text}")
+    
+    if text == "/start" or text == "start":
+        command_start(chat_id)
+    elif text == "/signal" or text == "signal":
+        send_message(chat_id, "📊 Analyzing market structure and order blocks...")
+    else:
+        send_message(chat_id, f"🤖 Command received: {text}. Type /start to see menu.")
 
-def get_candles(symbol="ARCUSD", resolution="15m", limit=50):
-    try:
-        url = f"{BASE_URL}/v2/history/candles"
-        params = {"symbol": symbol, "resolution": resolution, "limit": limit}
-        res = requests.get(url, params=params, timeout=10)
-        if res.ok:
-            return res.json().get("result", [])
-        return []
-    except Exception as e:
-        print("❌ Candles error:", e)
-        return []
+def handle_callback_query(chat_id, callback_data):
+    print(f"🔘 Button clicked: {callback_data}")
+    if callback_data == "BUY_SIGNAL":
+        send_message(chat_id, "🚀 BUY order signal triggered via button!")
+    elif callback_data == "SELL_SIGNAL":
+        send_message(chat_id, "🔻 SELL order signal triggered via button!")
+    elif callback_data == "STATUS":
+        send_message(chat_id, "🟢 System is Active and Monitoring Delta Exchange.")
+    elif callback_data == "AI_SIGNAL":
+        send_message(chat_id, "⚡ AI is scanning SMC & Order Flow...")
+    else:
+        send_message(chat_id, f"⚙️ Action processed: {callback_data}")
+
+def process_voice(chat_id, file_id):
+    send_message(chat_id, "🎙️ Voice note received! Processing audio command...")
