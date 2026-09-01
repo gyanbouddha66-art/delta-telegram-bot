@@ -1,44 +1,42 @@
 # ============================================================
-# FLASK WEB SERVER (`app.py`)
+# MAIN APPLICATION (`app.py`)
 # ============================================================
 
-from flask import Flask, request
+import os
+from flask import Flask, request, jsonify
 from telegram_bot import process_command, handle_callback_query, process_voice
 
 app = Flask(__name__)
 
-@app.route("/", methods=["GET", "HEAD"])
+@app.route("/", methods=["GET"])
 def index():
-    return "GH BOSS AI Trading Bot is Running Live! 🚀", 200
+    return "GH BOSS AI Trading Bot is Running Successfully!", 200
 
-@app.route("/", methods=["POST"])
-def webhook():
-    try:
-        data = request.json
-        if not data:
-            return "OK", 200
+@app.route(f"/webhook/{os.getenv('TELEGRAM_BOT_TOKEN', 'secret')}", methods=["POST"])
+def telegram_webhook():
+    data = request.get_json()
+    if not data:
+        return jsonify({"status": "error"}), 400
+
+    if "message" in data:
+        msg = data["message"]
+        chat_id = msg["chat"]["id"]
         
-        print("📥 Incoming Telegram Data:", data)
-        
-        if "message" in data:
-            msg = data["message"]
-            chat_id = msg["chat"]["id"]
-            text = msg.get("text", "")
-            if text:
-                process_command(text, chat_id)
-            elif "voice" in msg:
-                process_voice(msg["voice"]["file_id"], chat_id)
-                
-        elif "callback_query" in data:
-            cb = data["callback_query"]
-            chat_id = cb["message"]["chat"]["id"]
-            callback_data = cb.get("data", "")
-            handle_callback_query(callback_data, chat_id)
-            
-        return "OK", 200
-    except Exception as e:
-        print(f"❌ CRITICAL WEBHOOK ERROR: {str(e)}")
-        return "OK", 200
+        if "text" in msg:
+            text = msg["text"]
+            process_command(text, chat_id)
+        elif "voice" in msg:
+            file_id = msg["voice"]["file_id"]
+            process_voice(file_id, chat_id)
+
+    elif "callback_query" in data:
+        cq = data["callback_query"]
+        chat_id = cq["message"]["chat"]["id"]
+        callback_data = cq["data"]
+        handle_callback_query(callback_data, chat_id)
+
+    return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
