@@ -3,117 +3,125 @@
 # ============================================================
 
 import os
-import requests
 import time
 import hmac
 import hashlib
-import json
-from config import SYMBOL, PRODUCT_ID
+import requests
+from config import SYMBOL, PRODUCT_ID, DEFAULT_SIZE
 
+# Render या एनवायरनमेंट से API Keys प्राप्त करना
 API_KEY = os.getenv("DELTA_API_KEY", "").strip()
 API_SECRET = os.getenv("DELTA_API_SECRET", "").strip()
-BASE_URL = "https://api.delta.exchange"
+BASE_URL = "https://api.india.delta.exchange" # लाइव एक्सचेंज यूआरएल
 
-
-def generate_signature(method, endpoint, payload_str=""):
-    if not API_SECRET:
-        return "", ""
-    timestamp = str(int(time.time()))
-    signature_data = method + timestamp + endpoint + payload_str
+def get_signature(secret, method, path, query_string="", payload=""):
+    """डेल्टा एक्सचेंज के ऑथेंटिकेशन के लिए HMAC SHA256 सिग्नेचर बनाना"""
+    timestamp = str(int(time.time() * 1000))
+    signature_payload = timestamp + method + path + query_string + payload
     signature = hmac.new(
-        API_SECRET.encode('utf-8'),
-        signature_data.encode('utf-8'),
+        secret.encode('utf-8'),
+        signature_payload.encode('utf-8'),
         hashlib.sha256
     ).hexdigest()
     return timestamp, signature
 
+def test_delta():
+    """डेल्टा एपीआई कनेक्शन और ऑथेंटिकेशन टेस्ट करने के लिए"""
+    if not API_KEY or not API_SECRET:
+        return {"status": False, "message": "API Keys missing in environment"}
+    try:
+        path = "/v2/wallet/balances"
+        timestamp, signature = get_signature(API_SECRET, "GET", path)
+        headers = {
+            "api-key": API_KEY,
+            "signature": signature,
+            "timestamp": timestamp,
+            "Content-Type": "application/json"
+        }
+        url = f"{BASE_URL}{path}"
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return {"status": True, "message": "Delta API Connected Successfully"}
+        else:
+            return {"status": False, "message": f"Auth Failed: {response.text}"}
+    except Exception as e:
+        return {"status": False, "message": f"Connection Error: {str(e)}"}
 
 def get_live_price(symbol=SYMBOL):
+    """डेल्टा एक्सचेंज से किसी भी सिंबल का लाइव प्राइस प्राप्त करना"""
     try:
         url = f"{BASE_URL}/v2/products"
         res = requests.get(url, timeout=10)
         if res.ok:
             products = res.json().get("result", [])
             for p in products:
-                if p.get("symbol") == symbol or p.get("contract_unit") == symbol:
-                    return float(p.get("close", p.get("mark_price", 0)))
+                prod_symbol = p.get("symbol", "")
+                if symbol.lower() in prod_symbol.lower():
+                    price = p.get("mark_price", p.get("spot_price", p.get("close", 0)))
+                    if price:
+                        return float(price)
         return 0.0
     except Exception as e:
         print("Live price error:", e)
         return 0.0
 
-
-def get_candles(symbol=SYMBOL, resolution="15m", limit=50):
-    try:
-        url = f"{BASE_URL}/v2/history/candles"
-        params = {"symbol": symbol, "resolution": resolution, "limit": limit}
-        res = requests.get(url, params=params, timeout=10)
-        if res.ok:
-            return res.json().get("result", [])
-        return []
-    except Exception as e:
-        print("Candles error:", e)
-        return []
-
-
-def place_order(product_id=PRODUCT_ID, symbol=SYMBOL, side="buy", size=1, order_type="market"):
+def get_delta_balances():
+    """वॉलेट का लाइव बैलेंस देखने के लिए"""
     if not API_KEY or not API_SECRET:
-        return {"success": False, "error": "API Keys missing."}
+        return {"success": False, "error": "API keys not configured"}
     try:
-        endpoint = "/v2/orders"
-        url = f"{BASE_URL}{endpoint}"
-        payload = {
-            "product_id": int(product_id),
-            "size": int(size),
-            "side": side.lower(),
-            "order_type": order_type.lower()
-        }
-        payload_str = json.dumps(payload)
-        timestamp, signature = generate_signature("POST", endpoint, payload_str)
+        path = "/v2/wallet/balances"
+        timestamp, signature = get_signature(API_SECRET, "GET", path)
         headers = {
             "api-key": API_KEY,
-            "timestamp": timestamp,
             "signature": signature,
+            "timestamp": timestamp,
             "Content-Type": "application/json"
         }
-        response = requests.post(url, headers=headers, data=payload_str, timeout=15)
-        if response.ok:
-            res_data = response.json()
-            return {"success": True, "result": res_data.get("result", res_data)}
+        url = f"{BASE_URL}{path}"
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return {"success": True, "balances": data.get("result", [])}
         else:
             return {"success": False, "error": response.text}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-
-def test_delta():
-    """डेल्टा एपीआई कनेक्शन और प्राइस चेक करने के लिए"""
-    try:
-        price = get_live_price(SYMBOL)
-        if price > 0:
-            return {"success": True, "message": f"Delta API Connected. {SYMBOL} Price: {price}"}
-        else:
-            return {"success": False, "message": "Connected, but price returned 0."}
-    except Exception as e:
-        return {"success": False, "message": str(e)}
-
-
-def get_delta_balances():
-    """डेल्टा अकाउंट बैलेंस प्राप्त करने के लिए"""
+def place_order(product_id=PRODUCT_ID, symbol=SYMBOL, side="buy", size=DEFAULT_SIZE):
+    """डेल्टा एक्सचेंज पर आर्डर (Buy/Sell) प्लेस करने के लिए"""
     if not API_KEY or not API_SECRET:
-        return {"success": False, "error": "API Keys missing."}
+        return {"success": False, "error": "invalidapikey"}
+    
+    path = "/v2/orders"
+    url = f"{BASE_URL}{path}"
+    
+    payload_dict = {
+        "product_id": int(product_id),
+        "size": int(size),
+        "side": side.lower(),
+        "order_type": "market"
+    }
+    
+    import json
+    payload_str = json.dumps(payload_dict)
+    timestamp, signature = get_signature(API_SECRET, "POST", path, "", payload_str)
+    
+    headers = {
+        "api-key": API_KEY,
+        "signature": signature,
+        "timestamp": timestamp,
+        "Content-Type": "application/json"
+    }
+    
     try:
-        endpoint = "/v2/wallet/balances"
-        url = f"{BASE_URL}{endpoint}"
-        timestamp, signature = generate_signature("GET", endpoint)
-        headers = {
-            "api-key": API_KEY,
-            "timestamp": timestamp,
-            "signature": signature
-        }
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.ok:
-            return {"success": True, "result": response.json().get("result", [])}
+        response = requests.post(url, data=payload_str, headers=headers, timeout=10)
+        if response.status_code == 200:
+            res_data = response.json()
+            if res_data.get("success"):
+                return {"success": True, "result": res_data.get("result")}
+            else:
+                return {"success": False, "error": res_data.get("error", "Unknown error")}
         else:
             return {"success": False, "error": response.text}
     except Exception as e:
