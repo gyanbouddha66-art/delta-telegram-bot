@@ -1,50 +1,44 @@
 # ============================================================
-# GH BOSS AI — DEBUGGABLE & SAFE APP (`app.py`)
+# FLASK WEB SERVER (`app.py`)
 # ============================================================
 
-import os
 from flask import Flask, request
-from telegram_bot import process_command, process_voice, handle_callback_query
+from telegram_bot import process_command, handle_callback_query, process_voice
 
 app = Flask(__name__)
 
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET", "HEAD"])
 def index():
-    if request.method == "POST":
-        try:
-            data = request.json
-            print("📥 Incoming Telegram Data:", data)  # यह Render के Logs में दिखेगा!
-            
-            if not data:
-                return "OK", 200
+    return "GH BOSS AI Trading Bot is Running Live! 🚀", 200
 
-            # बटन क्लिक हैंडल करें
-            if "callback_query" in data:
-                cq = data["callback_query"]
-                chat_id = cq["message"]["chat"]["id"]
-                callback_data = cq["data"]
-                handle_callback_query(chat_id, callback_data)
-                return "OK", 200
-
-            # मैसेज या कमांड हैंडल करें
-            if "message" in data:
-                msg = data["message"]
-                chat_id = msg["chat"]["id"]
+@app.route("/", methods=["POST"])
+def webhook():
+    try:
+        data = request.json
+        if not data:
+            return "OK", 200
+        
+        print("📥 Incoming Telegram Data:", data)
+        
+        if "message" in data:
+            msg = data["message"]
+            chat_id = msg["chat"]["id"]
+            text = msg.get("text", "")
+            if text:
+                process_command(text, chat_id)
+            elif "voice" in msg:
+                process_voice(msg["voice"]["file_id"], chat_id)
                 
-                if "voice" in msg:
-                    file_id = msg["voice"]["file_id"]
-                    process_voice(chat_id, file_id)
-                elif "text" in msg:
-                    text = msg["text"]
-                    process_command(chat_id, text)
-
-            return "OK", 200
-        except Exception as e:
-            print("❌ CRITICAL WEBHOOK ERROR:", str(e))
-            return "OK", 200
-
-    return "GH BOSS AI Server is Live and Running 🟢", 200
+        elif "callback_query" in data:
+            cb = data["callback_query"]
+            chat_id = cb["message"]["chat"]["id"]
+            callback_data = cb.get("data", "")
+            handle_callback_query(callback_data, chat_id)
+            
+        return "OK", 200
+    except Exception as e:
+        print(f"❌ CRITICAL WEBHOOK ERROR: {str(e)}")
+        return "OK", 200
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
