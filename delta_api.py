@@ -55,6 +55,38 @@ def get_candles(symbol="BTCUSD", resolution="15m", limit=50):
         return []
 
 
+def test_delta():
+    """डेल्टा कनेक्शन टेस्ट करने के लिए"""
+    try:
+        price = get_live_price("BTCUSD")
+        if price > 0:
+            return True, f"Connected successfully! BTC Price: {price}"
+        return False, "Could not fetch live price."
+    except Exception as e:
+        return False, str(e)
+
+
+def get_delta_balances():
+    """वॉलेट बैलेंस चेक करने के लिए"""
+    if not API_KEY or not API_SECRET:
+        return {"success": False, "error": "API Keys missing."}
+    try:
+        endpoint = "/v2/wallet/balances"
+        url = f"{BASE_URL}{endpoint}"
+        timestamp, signature = generate_signature("GET", endpoint, "")
+        headers = {
+            "api-key": API_KEY,
+            "timestamp": timestamp,
+            "signature": signature
+        }
+        res = requests.get(url, headers=headers, timeout=10)
+        if res.ok:
+            return {"success": True, "result": res.json().get("result", [])}
+        return {"success": False, "error": res.text}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def place_order(product_id=27, side="buy", size=1, order_type="market"):
     if not API_KEY or not API_SECRET:
         return {"success": False, "error": "API Keys missing."}
