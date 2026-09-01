@@ -9,13 +9,11 @@ import hashlib
 import requests
 from config import SYMBOL, PRODUCT_ID, DEFAULT_SIZE
 
-# Render या एनवायरनमेंट से API Keys प्राप्त करना
 API_KEY = os.getenv("DELTA_API_KEY", "").strip()
 API_SECRET = os.getenv("DELTA_API_SECRET", "").strip()
-BASE_URL = "https://api.india.delta.exchange" # लाइव एक्सचेंज यूआरएल
+BASE_URL = "https://api.india.delta.exchange"
 
 def get_signature(secret, method, path, query_string="", payload=""):
-    """डेल्टा एक्सचेंज के ऑथेंटिकेशन के लिए HMAC SHA256 सिग्नेचर बनाना"""
     timestamp = str(int(time.time() * 1000))
     signature_payload = timestamp + method + path + query_string + payload
     signature = hmac.new(
@@ -26,7 +24,6 @@ def get_signature(secret, method, path, query_string="", payload=""):
     return timestamp, signature
 
 def test_delta():
-    """डेल्टा एपीआई कनेक्शन और ऑथेंटिकेशन टेस्ट करने के लिए"""
     if not API_KEY or not API_SECRET:
         return {"status": False, "message": "API Keys missing in environment"}
     try:
@@ -48,7 +45,6 @@ def test_delta():
         return {"status": False, "message": f"Connection Error: {str(e)}"}
 
 def get_live_price(symbol=SYMBOL):
-    """डेल्टा एक्सचेंज से किसी भी सिंबल का लाइव प्राइस प्राप्त करना"""
     try:
         url = f"{BASE_URL}/v2/products"
         res = requests.get(url, timeout=10)
@@ -65,8 +61,20 @@ def get_live_price(symbol=SYMBOL):
         print("Live price error:", e)
         return 0.0
 
+def get_candles(symbol=SYMBOL, resolution="15m", limit=50):
+    try:
+        url = f"{BASE_URL}/v2/history/candles"
+        params = {"symbol": symbol, "resolution": resolution, "limit": limit}
+        res = requests.get(url, params=params, timeout=10)
+        if res.ok:
+            data = res.json()
+            return data.get("result", [])
+        return []
+    except Exception as e:
+        print("Candles fetch error:", e)
+        return []
+
 def get_delta_balances():
-    """वॉलेट का लाइव बैलेंस देखने के लिए"""
     if not API_KEY or not API_SECRET:
         return {"success": False, "error": "API keys not configured"}
     try:
@@ -89,7 +97,6 @@ def get_delta_balances():
         return {"success": False, "error": str(e)}
 
 def place_order(product_id=PRODUCT_ID, symbol=SYMBOL, side="buy", size=DEFAULT_SIZE):
-    """डेल्टा एक्सचेंज पर आर्डर (Buy/Sell) प्लेस करने के लिए"""
     if not API_KEY or not API_SECRET:
         return {"success": False, "error": "invalidapikey"}
     
