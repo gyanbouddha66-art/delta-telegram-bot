@@ -24,7 +24,6 @@ def send_message(chat_id, text, reply_markup=None):
         print("Telegram send error:", e)
 
 def get_keyboard():
-    """यहाँ पर ट्रेडिंग के सारे जरूरी बटन्स हमेशा दिखेंगे"""
     auto_on = get_engine_status()
     mode_text = "⚙️ Mode: AUTO" if auto_on else "⚙️ Mode: MANUAL"
     return {
@@ -42,7 +41,7 @@ def process_command(text, chat_id):
             "✅ Telegram Connected\n"
             "✅ Groq AI Loaded\n"
             "✅ Trading Buttons Active\n\n"
-            "आप नीचे दिए गए बटन्स का उपयोग कर सकते हैं या सीधे चैट में कोई भी सवाल (जैसे ARCUSD कैसा है?) पूछ सकते हैं!"
+            "आप नीचे दिए गए बटन्स का उपयोग कर सकते हैं या सीधे चैट में कोई भी सवाल पूछ सकते हैं!"
         )
         send_message(chat_id, msg, get_keyboard())
     elif text == "/signal":
@@ -50,8 +49,13 @@ def process_command(text, chat_id):
         send_message(chat_id, report, get_keyboard())
     elif text == "/status":
         send_message(chat_id, "📊 **GH BOSS STATUS**\nEngine: ONLINE\nGroq AI: CONNECTED 🟢\nDelta: CONNECTED 🟢", get_keyboard())
+    elif text == "/balance":
+        bal_res = get_delta_balances()
+        if bal_res.get("success"):
+            send_message(chat_id, f"💰 **Delta Balances:**\n`{bal_res.get('balances')}`", get_keyboard())
+        else:
+            send_message(chat_id, f"❌ Balance Error: {bal_res.get('error')}", get_keyboard())
     else:
-        # अगर कोई नॉर्मल मैसेज या सवाल हो, तो Groq AI जवाब देगा और साथ में बटन्स भी दिखाएगा
         ai_response = ask_groq_ai(text)
         send_message(chat_id, f"🧠 **GH BOSS AI:**\n\n{ai_response}", get_keyboard())
 
@@ -72,6 +76,11 @@ def handle_callback_query(callback_data, chat_id):
     elif callback_data == "btn_sell":
         result = place_order(product_id=PRODUCT_ID, symbol=SYMBOL, side="sell", size=DEFAULT_SIZE)
         if result.get("success"):
-            send_message(chat_id, f"🔴 **SELL ORDER EXECUTED!**\nAsset: `{SYMBOL}`\nSize: `{DEFAULT_SIZE}`", get_keyword())
+            send_message(chat_id, f"🔴 **SELL ORDER EXECUTED!**\nAsset: `{SYMBOL}`\nSize: `{DEFAULT_SIZE}`", get_keyboard())
         else:
             send_message(chat_id, f"❌ **Order Failed:** {result.get('error')}", get_keyboard())
+
+def process_voice(file_id, chat_id):
+    send_message(chat_id, "🎤 वॉइस नोट मिला। AI इसे प्रोसेस कर रहा है...", get_keyboard())
+    ai_response = ask_groq_ai("User sent a voice note regarding crypto trading.")
+    send_message(chat_id, f"🧠 **GH BOSS AI:**\n\n{ai_response}", get_keyboard())
