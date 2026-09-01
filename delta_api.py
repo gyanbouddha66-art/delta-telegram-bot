@@ -1,5 +1,5 @@
 # ============================================================
-# GH BOSS AI — DELTA API MODULE
+# GH BOSS AI — DELTA API MODULE (DIRECT LIVE & SAFE)
 # ============================================================
 
 import os
@@ -12,12 +12,10 @@ BASE_URL = "https://api.delta.exchange"
 
 
 def test_delta():
-    if not API_KEY or not API_SECRET:
-        return {"success": False, "error": "API Keys missing in environment variables."}
     try:
-        url = f"{BASE_URL}/v2/wallet/balances"
+        url = f"{BASE_URL}/v2/products"
         response = requests.get(url, timeout=10)
-        if response.status_code in [200, 401, 403]:
+        if response.ok:
             return {"success": True, "message": "Connection OK"}
         return {"success": False, "error": f"HTTP Status: {response.status_code}"}
     except Exception as e:
@@ -32,7 +30,12 @@ def get_delta_balances():
         url = f"{BASE_URL}/v2/wallet/balances"
         response = requests.get(url, timeout=15)
         if response.ok:
-            return {"success": True, "balances": response.json().get("result", [])}
+            res_data = response.json()
+            # सुरक्षित रूप से लिस्ट या डिक्शनरी हैंडल करने के लिए
+            balances = res_data.get("result", [])
+            if isinstance(balances, dict):
+                balances = [balances]
+            return {"success": True, "balances": balances}
         else:
             return {"success": False, "error": response.text}
     except Exception as e:
@@ -63,26 +66,14 @@ def place_order(symbol="ARCUSD", side="buy", size=1, order_type="market"):
 
 def get_live_price(symbol="ARCUSD"):
     try:
-        url = f"{BASE_URL}/v2/products/{symbol}/ticker"
+        url = f"{BASE_URL}/v2/products"
         res = requests.get(url, timeout=10)
         if res.ok:
-            data = res.json().get("result", {})
-            price = float(data.get("close", data.get("mark_price", 0)))
-            return price
+            products = res.json().get("result", [])
+            for p in products:
+                if p.get("symbol") == symbol or p.get("contract_unit") == symbol:
+                    return float(p.get("close", p.get("mark_price", 0)))
         return 0.0
     except Exception as e:
         print("❌ Live price error:", e)
         return 0.0
-
-
-def get_candles(symbol="ARCUSD", resolution="15m", limit=50):
-    try:
-        url = f"{BASE_URL}/v2/history/candles"
-        params = {"symbol": symbol, "resolution": resolution, "limit": limit}
-        res = requests.get(url, params=params, timeout=10)
-        if res.ok:
-            return res.json().get("result", [])
-        return []
-    except Exception as e:
-        print("❌ Candles error:", e)
-        return []
