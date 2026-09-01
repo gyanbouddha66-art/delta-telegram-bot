@@ -3,14 +3,24 @@
 # ============================================================
 
 import os
+import requests
 from flask import Flask, request
 from telegram_bot import process_command, process_voice, handle_callback_query
 
-# ⚠️ यह 'app' नाम होना जरूरी है ताकि gunicorn app:app इसे ढूंढ सके
 app = Flask(__name__)
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 
+# सर्वर शुरू होते ही ऑटोमैटिक Webhook सेट करने का फंक्शन
+def set_webhook_automatically():
+    render_url = os.getenv("RENDER_EXTERNAL_URL", "").strip()
+    if TOKEN and render_url:
+        try:
+            webhook_url = f"https://api.telegram.org/bot{TOKEN}/setWebhook?url={render_url}"
+            res = requests.get(webhook_url, timeout=10)
+            print("🤖 Auto Webhook Setup Response:", res.text)
+        except Exception as e:
+            print("❌ Auto Webhook Error:", e)
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -49,5 +59,8 @@ def index():
 
 
 if __name__ == "__main__":
+    # ऐप चालू होने से पहले ऑटोमैटिक वेबहुक सेट करें
+    set_webhook_automatically()
+    
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
