@@ -1,76 +1,85 @@
-M
-My Workspace
+# ============================================================
+# GH BOSS AI — DELTA API MODULE (`delta_api.py`)
+# ============================================================
+
+import os
+import requests
+import time
+import hmac
+import hashlib
+import json
+
+API_KEY = os.getenv("DELTA_API_KEY", "").strip()
+API_SECRET = os.getenv("DELTA_API_SECRET", "").strip()
+BASE_URL = "https://api.delta.exchange"
 
 
-My project
-
-Production
-
-delta-telegram-bot
-
-Your free instance will spin down with inactivity, which can delay requests by 50 seconds or more.
-Upgrade now
-Newer logs may be unavailable because a recent deploy failed. View recent events.
-
-Application logs
-Search
-Search logs
-
-Last hour
+def generate_signature(method, endpoint, payload_str=""):
+    if not API_SECRET:
+        return "", ""
+    timestamp = str(int(time.time()))
+    signature_data = method + timestamp + endpoint + payload_str
+    signature = hmac.new(
+        API_SECRET.encode('utf-8'),
+        signature_data.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    return timestamp, signature
 
 
+def get_live_price(symbol="BTCUSD"):
+    try:
+        url = f"{BASE_URL}/v2/products"
+        res = requests.get(url, timeout=10)
+        if res.ok:
+            products = res.json().get("result", [])
+            for p in products:
+                if p.get("symbol") == symbol or p.get("contract_unit") == symbol:
+                    return float(p.get("close", p.get("mark_price", 0)))
+        return 0.0
+    except Exception as e:
+        print("Live price error:", e)
+        return 0.0
 
-==> Exited with status 1
-==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
-==> Running 'gunicorn app:app --workers 1 --threads 2 --timeout 120'
-127.0.0.1 - - [01/Sep/2026:07:06:46 +0000] "HEAD / HTTP/1.1" 200 0 "https://delta-telegram-bot-agg7.onrender.com" "Mozilla/5.0+(compatible; UptimeRobot/2.0; http://www.uptimerobot.com/)"
-==> Deploying...
-==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
-==> Running 'gunicorn app:app --workers 1 --threads 2 --timeout 120'
-Traceback (most recent call last):
-  File "/opt/render/project/src/.venv/bin/gunicorn", line 8, in <module>
-    sys.exit(run())
-  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/wsgiapp.py", line 66, in run
-    WSGIApplication("%(prog)s [OPTIONS] [APP_MODULE]", prog=prog).run()
-  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/base.py", line 235, in run
-    super().run()
-  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/base.py", line 71, in run
-    Arbiter(self).run()
-  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/arbiter.py", line 63, in __init__
-    self.setup(app)
-  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/arbiter.py", line 164, in setup
-    self.app.wsgi()
-  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/base.py", line 66, in wsgi
-    self.callable = self.load()
-  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/wsgiapp.py", line 57, in load
-    return self.load_wsgiapp()
-  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/app/wsgiapp.py", line 47, in load_wsgiapp
-    return util.import_app(self.app_uri)
-  File "/opt/render/project/src/.venv/lib/python3.10/site-packages/gunicorn/util.py", line 420, in import_app
-    mod = importlib.import_module(module)
-  File "/opt/render/project/python/Python-3.10.11/lib/python3.10/importlib/__init__.py", line 126, in import_module
-    return _bootstrap._gcd_import(name[level:], package, level)
-  File "<frozen importlib._bootstrap>", line 1050, in _gcd_import
-  File "<frozen importlib._bootstrap>", line 1027, in _find_and_load
-  File "<frozen importlib._bootstrap>", line 1006, in _find_and_load_unlocked
-  File "<frozen importlib._bootstrap>", line 688, in _load_unlocked
-  File "<frozen importlib._bootstrap_external>", line 883, in exec_module
-  File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
-  File "/opt/render/project/src/app.py", line 7, in <module>
-    from telegram_bot import process_command, process_voice, handle_callback_query
-  File "/opt/render/project/src/telegram_bot.py", line 9, in <module>
-    from trading_engine import get_engine_status, get_signal
-  File "/opt/render/project/src/trading_engine.py", line 4, in <module>
-    from delta_api import get_live_price, get_candles
-  File "/opt/render/project/src/delta_api.py", line 23
-    📥 Incoming Telegram Data: {'update_id': 74057849, 'message': {'message_id': 2777, 'from': {'id': 965643127, 'is_bot': False, 'first_name': 'Santosh', 'last_name': 'Mali', 'language_code': 'en'}, 'chat': {'id': 965643127, 'first_name': 'Santosh', 'last_name': 'Mali', 'type': 'private'}, 'date': 1788236462, 'text': '/start', 'entities': [{'offset': 0, 'length': 6, 'type': 'bot_command'}]}}
-    ^
-SyntaxError: invalid character '📥' (U+1F4E5)
-==> Exited with status 1
-==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
-==> Running 'gunicorn app:app --workers 1 --threads 2 --timeout 120'
-127.0.0.1 - - [01/Sep/2026:07:11:51 +0000] "HEAD / HTTP/1.1" 200 0 "https://delta-telegram-bot-agg7.onrender.com" "Mozilla/5.0+(compatible; UptimeRobot/2.0; http://www.uptimerobot.com/)"
-0 services selected:
 
-Move
+def get_candles(symbol="BTCUSD", resolution="15m", limit=50):
+    try:
+        url = f"{BASE_URL}/v2/history/candles"
+        params = {"symbol": symbol, "resolution": resolution, "limit": limit}
+        res = requests.get(url, params=params, timeout=10)
+        if res.ok:
+            return res.json().get("result", [])
+        return []
+    except Exception as e:
+        print("Candles error:", e)
+        return []
 
+
+def place_order(product_id=27, side="buy", size=1, order_type="market"):
+    if not API_KEY or not API_SECRET:
+        return {"success": False, "error": "API Keys missing."}
+    try:
+        endpoint = "/v2/orders"
+        url = f"{BASE_URL}{endpoint}"
+        payload = {
+            "product_id": int(product_id),
+            "size": int(size),
+            "side": side.lower(),
+            "order_type": order_type.lower()
+        }
+        payload_str = json.dumps(payload)
+        timestamp, signature = generate_signature("POST", endpoint, payload_str)
+        headers = {
+            "api-key": API_KEY,
+            "timestamp": timestamp,
+            "signature": signature,
+            "Content-Type": "application/json"
+        }
+        response = requests.post(url, headers=headers, data=payload_str, timeout=15)
+        if response.ok:
+            res_data = response.json()
+            return {"success": True, "result": res_data.get("result", res_data)}
+        else:
+            return {"success": False, "error": response.text}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
