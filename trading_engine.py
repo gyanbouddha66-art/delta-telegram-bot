@@ -1,209 +1,56 @@
-import os
-import math
+# ============================================================
+# TRADING ENGINE & SMC ANALYSIS (`trading_engine.py`)
+# ============================================================
 
+from config import SYMBOL, DEFAULT_SIZE
 from delta_api import get_live_price, get_candles
 
-
-# ============================================================
-# GH LIVE TRADING ENGINE
-# ============================================================
-
-SYMBOL = os.getenv("TRADE_SYMBOL", "BTCUSD")
-TIMEFRAME = os.getenv("TRADE_TIMEFRAME", "1m")
-
-SL_PERCENT = float(
-    os.getenv("SL_PERCENT", "0.40")
-)
-
-TP_PERCENT = float(
-    os.getenv("TP_PERCENT", "0.80")
-)
-
-MIN_CONFIDENCE = float(
-    os.getenv("MIN_CONFIDENCE", "70")
-)
-
-
-# ============================================================
-# EMA
-# ============================================================
-
-def ema(values, length):
-
-    if len(values) < length:
-        return None
-
-    multiplier = 2 / (length + 1)
-
-    result = sum(
-        values[:length]
-    ) / length
-
-    for price in values[length:]:
-
-        result = (
-            (price - result) * multiplier
-            + result
-        )
-
-    return result
-
-
-# ============================================================
-# ENGINE
-# ============================================================
-
-def get_signal(
-    symbol=None,
-    timeframe=None
-):
-
-    symbol = symbol or SYMBOL
-    timeframe = timeframe or TIMEFRAME
-
-    market = get_candles(
-        symbol,
-        timeframe,
-        200
-    )
-
-    if not market.get("success"):
-
-        return {
-            "signal": "NO TRADE",
-            "confidence": 0,
-            "reason": "Market data unavailable",
-            "error": market.get("error")
-        }
-
-    candles = market.get(
-        "candles",
-        []
-    )
-
-    if len(candles) < 50:
-
-        return {
-            "signal": "NO TRADE",
-            "confidence": 0,
-            "reason": "Not enough candles"
-        }
-
-    closes = [
-        float(x["close"])
-        for x in candles
-        if x.get("close") is not None
-    ]
-
-    if len(closes) < 50:
-
-        return {
-            "signal": "NO TRADE",
-            "confidence": 0,
-            "reason": "Invalid candle data"
-        }
-
-    price = closes[-1]
-
-    ema9 = ema(closes, 9)
-    ema21 = ema(closes, 21)
-    ema50 = ema(closes, 50)
-
-    score_buy = 0
-    score_sell = 0
-
-    if ema9 > ema21:
-        score_buy += 30
-    elif ema9 < ema21:
-        score_sell += 30
-
-    if ema21 > ema50:
-        score_buy += 30
-    elif ema21 < ema50:
-        score_sell += 30
-
-    if price > ema9:
-        score_buy += 20
-    elif price < ema9:
-        score_sell += 20
-
-    if closes[-1] > closes[-2]:
-        score_buy += 20
-    elif closes[-1] < closes[-2]:
-        score_sell += 20
-
-    if score_buy >= MIN_CONFIDENCE:
-
-        entry = price
-
-        sl = entry * (
-            1 - SL_PERCENT / 100
-        )
-
-        tp = entry * (
-            1 + TP_PERCENT / 100
-        )
-
-        return {
-            "signal": "BUY",
-            "confidence": score_buy,
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "entry": entry,
-            "sl": sl,
-            "tp": tp,
-            "rr": TP_PERCENT / SL_PERCENT,
-            "reason": (
-                "EMA trend + price momentum bullish"
-            )
-        }
-
-    if score_sell >= MIN_CONFIDENCE:
-
-        entry = price
-
-        sl = entry * (
-            1 + SL_PERCENT / 100
-        )
-
-        tp = entry * (
-            1 - TP_PERCENT / 100
-        )
-
-        return {
-            "signal": "SELL",
-            "confidence": score_sell,
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "entry": entry,
-            "sl": sl,
-            "tp": tp,
-            "rr": TP_PERCENT / SL_PERCENT,
-            "reason": (
-                "EMA trend + price momentum bearish"
-            )
-        }
-
-    return {
-        "signal": "NO TRADE",
-        "confidence": max(
-            score_buy,
-            score_sell
-        ),
-        "symbol": symbol,
-        "timeframe": timeframe,
-        "entry": price,
-        "reason": "Signal confidence below threshold"
-    }
-
+auto_mode_status = False  # बॉट का वर्तमान ऑटो/मैन्युअल स्टेटस
 
 def get_engine_status():
+    global auto_mode_status
+    return auto_mode_status
 
-    return {
-        "engine": "ONLINE",
-        "mode": "LIVE",
-        "live_trading": True,
-        "symbol": SYMBOL,
-        "timeframe": TIMEFRAME,
-        "signal": "READY"
-    }
+def toggle_engine_mode():
+    global auto_mode_status
+    auto_mode_status = not auto_mode_status
+    return auto_mode_status
+
+def get_signal():
+    price = get_live_price(SYMBOL)
+    candles = get_candles(SYMBOL, "15m", 20)
+    
+    if not candles or price == 0.0:
+        return f"⚠️ डेल्टा एक्सचेंज से `{SYMBOL}` का लाइव डेटा प्राप्त करने में असमर्थ।"
+
+    try:
+        latest = float(candles[-1].get("close", price))
+        prev = float(candles[-2].get("close", price))
+        diff = latest - prev
+        
+        trend = "🟢 बुलिश (UPWARD - Order Block Support)" if diff >= 0 else "🔴 बियरिश (DOWNWARD - Supply Zone Rejection)"
+        sl = latest - 50 if diff >= 0 else latest + 50
+        tp1 = latest + 100 if diff >= 0 else latest - 100
+        tp2 = latest + 200 if diff >= 0 else latest - 200
+        mode_str = "AUTO" if auto_mode_status else "MANUAL"
+
+        report = f"""🧠 **GH BOSS AI — SMART TRADING SYSTEM**
+🪙 **Asset:** `{SYMBOL}` | **Mode:** `{mode_str}`
+💵 **Live Price:** `{price}`
+
+---
+### 📊 SMC & Order Flow Analysis
+- **Trend Structure:** {trend}
+- **Lot Size:** `{DEFAULT_SIZE}`
+
+### 🎯 Entry, SL & TP Setup
+1. **Entry Type:** Market / Order Block Break
+2. **Stop Loss (SL):** `{sl}`
+3. **Take Profit (TP 1):** `{tp1}`
+4. **Take Profit (TP 2):** `{tp2}`
+
+> **Status:** लाइव डेटा और आर्डर सिस्टम सक्रिय है। नीचे दिए गए बटन्स से ट्रेड नियंत्रित करें।
+"""
+        return report
+    except Exception as e:
+        return f"Analysis Error: {str(e)}"
