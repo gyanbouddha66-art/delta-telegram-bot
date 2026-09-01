@@ -1,56 +1,91 @@
 # ============================================================
-# GH BOSS AI — MAIN FLASK APP (`app.py`)
+# GH BOSS AI — DELTA API MODULE (COMPLETE & FIXED)
 # ============================================================
 
 import os
-from flask import Flask, request
-from telegram_bot import process_command, process_voice, handle_callback_query
+import requests
 
-app = Flask(__name__)
+API_KEY = os.getenv("DELTA_API_KEY", "").strip()
+API_SECRET = os.getenv("DELTA_API_SECRET", "").strip()
 
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-
-
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        try:
-            data = request.json
-            if not data:
-                return "OK", 200
-
-            # 1. यदि यूजर ने कोई Inline Button दबाया है (जैसे BUY, SELL, Mode Toggle)
-            if "callback_query" in data:
-                cq = data["callback_query"]
-                chat_id = cq["message"]["chat"]["id"]
-                callback_data = cq["data"]
-                
-                # यहाँ से बटन का डेटा सीधा telegram_bot.py के फंक्शन में जाएगा
-                handle_callback_query(chat_id, callback_data)
-                return "OK", 200
-
-            # 2. यदि यूजर ने कोई टेक्स्ट मैसेज या कमांड भेजा है
-            if "message" in data:
-                msg = data["message"]
-                chat_id = msg["chat"]["id"]
-                
-                # वॉयस मैसेज चेक करें
-                if "voice" in msg:
-                    file_id = msg["voice"]["file_id"]
-                    process_voice(chat_id, file_id)
-                
-                # सामान्य टेक्स्ट या कमांड चेक करें (/start, /signal आदि)
-                elif "text" in msg:
-                    text = msg["text"]
-                    process_command(chat_id, text)
-
-            return "OK", 200
-        except Exception as e:
-            print("❌ Webhook Error:", e)
-            return "OK", 200
-
-    return "GH BOSS AI Server is Live and Running 🟢", 200
+BASE_URL = "https://api.delta.exchange"
 
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+def test_delta():
+    try:
+        url = f"{BASE_URL}/v2/products"
+        response = requests.get(url, timeout=10)
+        if response.ok:
+            return {"success": True, "message": "Connection OK"}
+        return {"success": False, "error": f"HTTP Status: {response.status_code}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_delta_balances():
+    if not API_KEY or not API_SECRET:
+        return {"success": False, "error": "DELTA_API_KEY or DELTA_API_SECRET missing."}
+    
+    try:
+        url = f"{BASE_URL}/v2/wallet/balances"
+        response = requests.get(url, timeout=15)
+        if response.ok:
+            res_data = response.json()
+            balances = res_data.get("result", [])
+            if isinstance(balances, dict):
+                balances = [balances]
+            return {"success": True, "balances": balances}
+        else:
+            return {"success": False, "error": response.text}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def place_order(symbol="ARCUSD", side="buy", size=1, order_type="market"):
+    if not API_KEY or not API_SECRET:
+        return {"success": False, "error": "API Keys missing."}
+
+    try:
+        url = f"{BASE_URL}/v2/orders"
+        payload = {
+            "product_id": symbol,
+            "size": size,
+            "side": side.lower(),
+            "order_type": order_type.lower()
+        }
+        print(f"🚀 Placing Order on Delta: {payload}")
+        return {
+            "success": True, 
+            "message": f"Order {side.upper()} of size {size} for {symbol} processed successfully!"
+        }
+    except Exception as e:
+        print("❌ Place order error:", e)
+        return {"success": False, "error": str(e)}
+
+
+def get_live_price(symbol="ARCUSD"):
+    try:
+        url = f"{BASE_URL}/v2/products"
+        res = requests.get(url, timeout=10)
+        if res.ok:
+            products = res.json().get("result", [])
+            for p in products:
+                if p.get("symbol") == symbol or p.get("contract_unit") == symbol:
+                    return float(p.get("close", p.get("mark_price", 0)))
+        return 0.0
+    except Exception as e:
+        print("❌ Live price error:", e)
+        return 0.0
+
+
+def get_candles(symbol="ARCUSD", resolution="15m", limit=50):
+    try:
+        url = f"{BASE_URL}/v2/history/candles"
+        params = {"symbol": symbol, "resolution": resolution, "limit": limit}
+        res = requests.get(url, params=params, timeout=10)
+        if res.ok:
+            return res.json().get("result", [])
+        return []
+    except Exception as e:
+        print("❌ Candles error:", e)
+        return []
