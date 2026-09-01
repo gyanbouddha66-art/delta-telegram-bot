@@ -1,5 +1,5 @@
 # ============================================================
-# GH BOSS AI — DELTA API MODULE (DIRECT LIVE & SAFE)
+# GH BOSS AI — DELTA API MODULE
 # ============================================================
 
 import os
@@ -31,7 +31,6 @@ def get_delta_balances():
         response = requests.get(url, timeout=15)
         if response.ok:
             res_data = response.json()
-            # सुरक्षित रूप से लिस्ट या डिक्शनरी हैंडल करने के लिए
             balances = res_data.get("result", [])
             if isinstance(balances, dict):
                 balances = [balances]
@@ -44,7 +43,7 @@ def get_delta_balances():
 
 def place_order(symbol="ARCUSD", side="buy", size=1, order_type="market"):
     if not API_KEY or not API_SECRET:
-        return {"success": False, "error": "API Keys missing."}
+        return {"success": False, "error": "APIKeys missing."}
 
     try:
         url = f"{BASE_URL}/v2/orders"
@@ -77,3 +76,16 @@ def get_live_price(symbol="ARCUSD"):
     except Exception as e:
         print("❌ Live price error:", e)
         return 0.0
+
+
+def get_candles(symbol="ARCUSD", resolution="15m", limit=50):
+    try:
+        url = f"{BASE_URL}/v2/history/candles"
+        params = {"symbol": symbol, "resolution": resolution, "limit": limit}
+        res = requests.get(url, params=params, timeout=10)
+        if res.ok:
+            return res.json().get("result", [])
+        return []
+    except Exception as e:
+        print("❌ Candles error:", e)
+        return []
