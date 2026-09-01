@@ -2,8 +2,8 @@
 # CONFIGURATION (`config.py`)
 # ============================================================
 
-SYMBOL = "ARCUSD"       # डिफ़ॉल्ट क्रिप्टो पेयर
-PRODUCT_ID = 27         # डेल्टा एक्सचेंज प्रोडक्ट आईडी (जरूरत पड़ने पर बदल सकते हैं)
-DEFAULT_SIZE = 1        # डिफ़ॉल्ट लॉट साइज / क्वांटिटी
-TIMEFRAME = "15m"       # एनालिसिस टाइमफ्रेम
-AUTO_TRADING_ENABLED = False  # शुरू में मैन्युअल मोड, टेलीग्राम से ऑटो कर सकते हैं
+SYMBOL = "ARCUSD"
+PRODUCT_ID = 27
+DEFAULT_SIZE = 10          # डेल्टा एक्सचेंज की न्यूनतम साइज आवश्यकताओं के अनुसार
+TIMEFRAME = "15m"
+AUTO_TRADING_ENABLED = False
