@@ -96,3 +96,25 @@ def test_delta():
             return {"success": False, "message": "Connected, but price returned 0."}
     except Exception as e:
         return {"success": False, "message": str(e)}
+
+
+def get_delta_balances():
+    """डेल्टा अकाउंट बैलेंस प्राप्त करने के लिए"""
+    if not API_KEY or not API_SECRET:
+        return {"success": False, "error": "API Keys missing."}
+    try:
+        endpoint = "/v2/wallet/balances"
+        url = f"{BASE_URL}{endpoint}"
+        timestamp, signature = generate_signature("GET", endpoint)
+        headers = {
+            "api-key": API_KEY,
+            "timestamp": timestamp,
+            "signature": signature
+        }
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.ok:
+            return {"success": True, "result": response.json().get("result", [])}
+        else:
+            return {"success": False, "error": response.text}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
