@@ -83,24 +83,15 @@ def run_scalp_ai(market_data, symbol):
     - BUY or SELL (No WAIT, give a clear direction based on momentum).
     """
     
-    # एकाधिक मॉडल्स की लिस्ट ताकि जो चालू हो, उससे रिस्पॉन्स आ जाए
-    models_to_try = [
-        "llama-3.1-8b-instant",
-        "llama-3.3-70b-versatile",
-        "llama3-70b-8192"
-    ]
-    
-    for model_name in models_to_try:
-        try:
-            response = client.chat.completions.create(
-                messages=[{"role": "user", "content": prompt}],
-                model=model_name,
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            continue
-            
-    return "AI Error: All models failed or unavailable."
+    try:
+        # वर्तमान में 100% एक्टिव और वर्किंग मॉडल
+        response = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile",
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"AI Error: {str(e)}"
 
 def execute_delta_scalp(signal, target_symbol):
     if "AI Error" in signal or "Error" in signal:
