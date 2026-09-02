@@ -20,18 +20,19 @@ def get_all_delta_symbols():
         product_map = {}
         for p in products:
             sym = str(p.get("symbol", "")).strip().upper()
-            if sym and not sym.startswith("C-") and not sym.startswith("P-"):
+            p_id = p.get("id")
+            # केवल फ्यूचर्स/परपेचुअल लें, ऑप्शन (C-/P-) छोड़ें और आईडी ज़रूर होनी चाहिए
+            if sym and p_id and not sym.startswith("C-") and not sym.startswith("P-"):
                 symbols.append(sym)
-                product_map[sym] = p.get("id")
+                product_map[sym] = p_id
                 
         return sorted(list(set(symbols))), product_map
     except Exception as e:
-        return ["ARCUSD", "BTCUSD", "ETHUSD"], {}
+        return ["ARCUSD", "BTCUSD"], {}
 
-# डेल्टा के सारे कॉइन की लिस्ट लोड करना
+# डेल्टा के सारे कॉइन और उनकी आईडी लोड करना
 all_symbols, product_map = get_all_delta_symbols()
 
-# 1. यूजर सिर्फ कॉइन सिलेक्ट करेगा
 selected_coin = st.selectbox(
     "🪙 ट्रेड करने के लिए कॉइन चुनें:",
     all_symbols if all_symbols else ["ARCUSD", "BTCUSD"]
@@ -40,6 +41,7 @@ selected_coin = st.selectbox(
 def fetch_delta_market_data(target_symbol, p_map):
     try:
         product_id = p_map.get(target_symbol)
+        
         if not product_id:
             prod_url = "https://api.delta.exchange/v2/products"
             response = requests.get(prod_url).json()
@@ -54,12 +56,13 @@ def fetch_delta_market_data(target_symbol, p_map):
         if not product_id:
             return None, f"डेल्टा पर {target_symbol} की आईडी नहीं मिली।"
             
-        candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=5"
+        # सीधे प्रोडक्ट आईडी का उपयोग करके 1 मिनट की कैंडल फेच करना
+        candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=10"
         candle_res = requests.get(candles_url).json()
         
         raw_candles = candle_res.get("result", [])
         if not raw_candles:
-            return None, f"कैंडल डेटा खाली है for {target_symbol}"
+            return None, f"कैंडल डेटा खाली है for {target_symbol} (ID: {product_id})"
             
         df = pd.DataFrame(raw_candles, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
@@ -105,7 +108,7 @@ def execute_delta_scalp(signal, target_symbol):
         trade_sym = target_symbol if target_symbol in exchange.symbols else 'BTCUSD'
         if trade_sym not in exchange.symbols:
             for s in exchange.symbols:
-                if target_symbol.replace("USD", "") in s.upper():
+                if target_symbol.replace("_", "").replace("USD", "") in s.upper():
                     trade_sym = s
                     break
 
@@ -134,7 +137,6 @@ def execute_delta_scalp(signal, target_symbol):
     except Exception as e:
         return f"❌ Trade Execution Error: {str(e)}"
 
-# --- 2. यूजर सिर्फ बटन दबाएगा और सब काम AI करेगा ---
 if st.button("⚡ Run Instant Scalp & Risk Manager"):
     with st.spinner(f"{selected_coin} पर AI द्वारा ट्रेड लिया जा रहा है..."):
         data, active_symbol = fetch_delta_market_data(selected_coin, product_map)
