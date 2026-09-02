@@ -1,9 +1,9 @@
 import os
 import time
+import json
 import hmac
 import hashlib
 from urllib.parse import urlencode
-from datetime import datetime, timezone
 
 import requests
 import pandas as pd
@@ -12,46 +12,44 @@ from groq import Groq
 
 
 # ============================================================
-# GH BOSS AI — DELTA AUTO SCALPER
-# ARCUSD | 1 MIN | LOT SIZE 1
+# GH BOSS AI - DELTA AUTO SCALPER
 # ============================================================
 
 BASE_URL = "https://api.india.delta.exchange"
 
-DEFAULT_SYMBOL = "ARCUSD"
+SYMBOL = "ARCUSD"
 TIMEFRAME = "1m"
 
 LOT_SIZE = 1
 
-CANDLE_LIMIT = 50
+SL_PERCENT = 0.005
+TP_PERCENT = 0.010
 
-# Risk
-SL_PERCENT = 0.0050       # 0.50%
-TP_PERCENT = 0.0100       # 1.00%
-
-# Automatic scan
 SCAN_SECONDS = 30
 COOLDOWN_SECONDS = 60
 
-REQUEST_TIMEOUT = 15
+TIMEOUT = 15
 
 
 # ============================================================
-# STREAMLIT
+# PAGE
 # ============================================================
 
 st.set_page_config(
-    page_title="GH Boss AI Auto Scalper",
+    page_title="GH BOSS AI",
     page_icon="⚡",
     layout="wide"
 )
 
-st.title("⚡ GH BOSS AI — DELTA AUTO SCALPER")
-st.caption("Delta India • Direct REST API • ARCUSD • 1m • Lot Size 1")
+st.title("⚡ GH BOSS AI - DELTA AUTO SCALPER")
+
+st.write(
+    "ARCUSD | 1 Minute | Lot Size 1 | Delta India"
+)
 
 
 # ============================================================
-# ENVIRONMENT
+# ENV
 # ============================================================
 
 DELTA_API_KEY = os.getenv("DELTA_API_KEY", "").strip()
@@ -60,20 +58,14 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
 
 # ============================================================
-# SESSION STATE
+# SESSION
 # ============================================================
-
-if "last_trade_time" not in st.session_state:
-    st.session_state.last_trade_time = 0
 
 if "last_signal" not in st.session_state:
     st.session_state.last_signal = "NONE"
 
-if "last_order" not in st.session_state:
-    st.session_state.last_order = None
-
-if "running" not in st.session_state:
-    st.session_state.running = False
+if "last_trade_time" not in st.session_state:
+    st.session_state.last_trade_time = 0
 
 if "logs" not in st.session_state:
     st.session_state.logs = []
@@ -83,21 +75,21 @@ if "logs" not in st.session_state:
 # LOG
 # ============================================================
 
-def log(message):
-    now = datetime.now().strftime("%H:%M:%S")
-    text = f"[{now}] {message}"
+def add_log(text):
+    current_time = time.strftime("%H:%M:%S")
+    message = "[" + current_time + "] " + text
 
-    st.session_state.logs.insert(0, text)
+    st.session_state.logs.insert(0, message)
 
-    # Keep only latest 100 logs
-    st.session_state.logs = st.session_state.logs[:100]
+    st.session_state.logs = st.session_state.logs[:50]
 
 
 # ============================================================
-# DELTA SIGNATURE
+# SIGNATURE
 # ============================================================
 
-def make_signature(method, timestamp, path, query_string="", body=""):
+def create_signature(method, timestamp, path, query_string, body):
+
     message = (
         method
         + str(timestamp)
@@ -107,8 +99,8 @@ def make_signature(method, timestamp, path, query_string="", body=""):
     )
 
     signature = hmac.new(
-        DELTA_API_SECRET.encode("utf-8"),
-        message.encode("utf-8"),
+        DELTA_API_SECRET.encode(),
+        message.encode(),
         hashlib.sha256
     ).hexdigest()
 
@@ -119,16 +111,23 @@ def make_signature(method, timestamp, path, query_string="", body=""):
 # DELTA REQUEST
 # ============================================================
 
-def delta_request(method, path, params=None, body=None, auth=False):
+def delta_request(
+    method,
+    path,
+    params=None,
+    body=None,
+    authenticated=False
+):
 
-    params = params or {}
+    if params is None:
+        params = {}
 
-    body = body or {}
+    if body is None:
+        body = {}
 
     body_text = ""
 
     if body:
-        import json
         body_text = json.dumps(
             body,
             separators=(",", ":")
@@ -137,29 +136,27 @@ def delta_request(method, path, params=None, body=None, auth=False):
     query_string = ""
 
     if params:
-        query_string = "?" + urlencode(
-            params,
-            doseq=True
-        )
+        query_string = "?" + urlencode(params)
 
     url = BASE_URL + path + query_string
 
     headers = {
-        "Content-Type": "application/json",
         "Accept": "application/json",
-        "User-Agent": "GH-BOSS-AI-AUTO-SCALPER/1.0"
+        "Content-Type": "application/json",
+        "User-Agent": "GH-BOSS-AI"
     }
 
-    if auth:
+    if authenticated:
 
-        if not DELTA_API_KEY or not DELTA_API_SECRET:
-            raise Exception(
-                "DELTA_API_KEY / DELTA_API_SECRET missing"
-            )
+        if not DELTA_API_KEY:
+            raise Exception("DELTA_API_KEY missing")
+
+        if not DELTA_API_SECRET:
+            raise Exception("DELTA_API_SECRET missing")
 
         timestamp = int(time.time())
 
-        signature = make_signature(
+        signature = create_signature(
             method.upper(),
             timestamp,
             path,
@@ -176,114 +173,82 @@ def delta_request(method, path, params=None, body=None, auth=False):
         url=url,
         headers=headers,
         data=body_text if body else None,
-        timeout=REQUEST_TIMEOUT
+        timeout=TIMEOUT
     )
 
     try:
         data = response.json()
     except Exception:
-        data = {
-            "success": False,
-            "http_status": response.status_code,
-            "raw": response.text
-        }
+        raise Exception(
+            "Delta returned invalid response: "
+            + response.text[:500]
+        )
 
     if response.status_code >= 400:
 
         raise Exception(
-            f"HTTP {response.status_code}: {data}"
+            "HTTP "
+            + str(response.status_code)
+            + ": "
+            + str(data)
         )
 
     return data
 
 
 # ============================================================
-# PRODUCT
+# GET PRODUCT
 # ============================================================
 
 def get_product(symbol):
 
     data = delta_request(
         "GET",
-        f"/v2/products/{symbol}"
+        "/v2/products/" + symbol
     )
 
-    if not data.get("success", False):
+    if not data.get("success"):
         raise Exception(
-            f"Product error: {data}"
+            "Product error: " + str(data)
         )
 
-    result = data.get("result")
+    return data.get("result")
 
-    if not result:
+
+# ============================================================
+# GET TICKER
+# ============================================================
+
+def get_ticker(symbol):
+
+    data = delta_request(
+        "GET",
+        "/v2/tickers/" + symbol
+    )
+
+    if not data.get("success"):
         raise Exception(
-            f"Product not found: {symbol}"
+            "Ticker error: " + str(data)
         )
 
-    return result
+    return data.get("result", {})
 
 
 # ============================================================
-# ALL PRODUCTS
-# ============================================================
-
-def get_all_products():
-
-    all_products = []
-
-    after = None
-
-    for _ in range(20):
-
-        params = {
-            "page_size": 100
-        }
-
-        if after:
-            params["after"] = after
-
-        data = delta_request(
-            "GET",
-            "/v2/products",
-            params=params
-        )
-
-        if not data.get("success", False):
-            break
-
-        result = data.get("result", [])
-
-        if not isinstance(result, list):
-            break
-
-        all_products.extend(result)
-
-        meta = data.get("meta", {})
-
-        next_cursor = meta.get("next_cursor")
-
-        if not next_cursor:
-            break
-
-        after = next_cursor
-
-    return all_products
-
-
-# ============================================================
-# CANDLES
+# GET CANDLES
 # ============================================================
 
 def get_candles(symbol):
 
-    end = int(time.time())
-    start = end - (CANDLE_LIMIT * 60)
+    end_time = int(time.time())
+
+    start_time = end_time - (60 * 60)
 
     params = {
         "resolution": "1m",
         "symbol": symbol,
-        "start": start,
-        "end": end
+        "start": start_time,
+        "end": end_time
     }
 
     data = delta_request(
@@ -292,19 +257,33 @@ def get_candles(symbol):
         params=params
     )
 
-    if not data.get("success", False):
+    if not data.get("success"):
         raise Exception(
-            f"Candle error: {data}"
+            "Candle error: " + str(data)
         )
 
-    rows = data.get("result", [])
+    candles = data.get("result", [])
 
-    if not rows:
+    if not candles:
         return pd.DataFrame()
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(candles)
 
-    # Normalize possible timestamp field
+    for column in [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume"
+    ]:
+
+        if column in df.columns:
+
+            df[column] = pd.to_numeric(
+                df[column],
+                errors="coerce"
+            )
+
     if "time" in df.columns:
 
         df["time"] = pd.to_datetime(
@@ -312,14 +291,6 @@ def get_candles(symbol):
             unit="s",
             errors="coerce"
         )
-
-    for col in ["open", "high", "low", "close", "volume"]:
-
-        if col in df.columns:
-            df[col] = pd.to_numeric(
-                df[col],
-                errors="coerce"
-            )
 
     df = df.sort_values(
         "time"
@@ -329,49 +300,32 @@ def get_candles(symbol):
 
 
 # ============================================================
-# TICKER
-# ============================================================
-
-def get_ticker(symbol):
-
-    data = delta_request(
-        "GET",
-        f"/v2/tickers/{symbol}"
-    )
-
-    if not data.get("success", False):
-        raise Exception(
-            f"Ticker error: {data}"
-        )
-
-    return data.get("result", {})
-
-
-# ============================================================
-# POSITION
+# GET POSITION
 # ============================================================
 
 def get_position(product_id):
 
+    params = {
+        "product_id": product_id
+    }
+
     data = delta_request(
         "GET",
         "/v2/positions",
-        params={
-            "product_id": product_id
-        },
-        auth=True
+        params=params,
+        authenticated=True
     )
 
-    if not data.get("success", False):
+    if not data.get("success"):
         raise Exception(
-            f"Position error: {data}"
+            "Position error: " + str(data)
         )
 
     result = data.get("result")
 
     if isinstance(result, list):
 
-        if not result:
+        if len(result) == 0:
             return None
 
         return result[0]
@@ -383,7 +337,7 @@ def get_position(product_id):
 # POSITION SIZE
 # ============================================================
 
-def get_position_size(position):
+def position_size(position):
 
     if not position:
         return 0
@@ -397,61 +351,60 @@ def get_position_size(position):
 
 
 # ============================================================
-# AI SIGNAL
+# GROQ AI
 # ============================================================
 
 def get_ai_signal(df):
 
     if not GROQ_API_KEY:
-        raise Exception(
-            "GROQ_API_KEY missing"
-        )
+        raise Exception("GROQ_API_KEY missing")
 
     if len(df) < 20:
         return "NO_TRADE"
 
-    recent = df.tail(20).copy()
+    recent = df.tail(20)
 
-    candle_text = ""
+    text = ""
 
     for _, row in recent.iterrows():
 
-        candle_text += (
-            f"O={row.get('open')} "
-            f"H={row.get('high')} "
-            f"L={row.get('low')} "
-            f"C={row.get('close')} "
-            f"V={row.get('volume')}\n"
+        text += (
+            "O="
+            + str(row["open"])
+            + " H="
+            + str(row["high"])
+            + " L="
+            + str(row["low"])
+            + " C="
+            + str(row["close"])
+            + " V="
+            + str(row["volume"])
+            + "\n"
         )
 
-    prompt = f"""
-You are a strict crypto scalping decision engine.
+    prompt = """
+You are a strict 1-minute crypto scalping signal engine.
 
-Symbol: ARCUSD
-Timeframe: 1 minute.
+Analyze the candle data.
 
-Analyze the last 20 candles.
+Consider:
+1. Short-term trend
+2. Momentum
+3. Candle structure
+4. Breakout or breakdown
+5. Volume
+6. Recent price direction
 
-Look for:
-- bullish/bearish price structure
-- momentum
-- consecutive candle direction
-- rejection
-- breakout/breakdown
-- volume confirmation
-- short-term trend
-
-You MUST choose exactly one:
+Return ONLY one of these:
 
 BUY
 SELL
 NO_TRADE
 
-Do not write anything else.
+Do not return any explanation.
 
-Candles:
-{candle_text}
-"""
+Candle data:
+""" + text
 
     client = Groq(
         api_key=GROQ_API_KEY
@@ -466,7 +419,7 @@ Candles:
             }
         ],
         temperature=0,
-        max_tokens=10
+        max_tokens=5
     )
 
     answer = (
@@ -477,10 +430,10 @@ Candles:
         .upper()
     )
 
-    if "BUY" in answer:
+    if answer == "BUY":
         return "BUY"
 
-    if "SELL" in answer:
+    if answer == "SELL":
         return "SELL"
 
     return "NO_TRADE"
@@ -490,89 +443,75 @@ Candles:
 # MARKET ORDER
 # ============================================================
 
-def place_market_order(
-    product_symbol,
-    side
-):
+def market_order(symbol, side):
 
     body = {
-        "product_symbol": product_symbol,
+        "product_symbol": symbol,
         "size": LOT_SIZE,
         "side": side,
         "order_type": "market_order",
-        "time_in_force": "ioc",
-        "reduce_only": False,
-        "post_only": False,
-        "mmp": "disabled"
+        "time_in_force": "ioc"
     }
 
     data = delta_request(
         "POST",
         "/v2/orders",
         body=body,
-        auth=True
+        authenticated=True
     )
 
-    if not data.get("success", False):
+    if not data.get("success"):
         raise Exception(
-            f"Order failed: {data}"
+            "Order failed: " + str(data)
         )
 
     return data.get("result", {})
 
 
 # ============================================================
-# BRACKET ORDER
+# BRACKET
 # ============================================================
 
-def place_bracket(
-    product_symbol,
-    side,
-    entry_price
-):
+def create_bracket(symbol, side, entry):
 
-    entry_price = float(entry_price)
+    entry = float(entry)
 
     if side == "buy":
 
-        stop_price = entry_price * (
+        stop_price = entry * (
             1 - SL_PERCENT
         )
 
-        take_price = entry_price * (
+        take_price = entry * (
             1 + TP_PERCENT
         )
 
     else:
 
-        stop_price = entry_price * (
+        stop_price = entry * (
             1 + SL_PERCENT
         )
 
-        take_price = entry_price * (
+        take_price = entry * (
             1 - TP_PERCENT
         )
 
-    stop_loss_order = {
-        "order_type": "market_order",
-        "stop_price": str(
-            round(stop_price, 8)
-        )
-    }
-
-    take_profit_order = {
-        "order_type": "limit_order",
-        "limit_price": str(
-            round(take_price, 8)
-        )
-    }
-
     body = {
-        "product_symbol": product_symbol,
+        "product_symbol": symbol,
 
-        "stop_loss_order": stop_loss_order,
+        "stop_loss_order": {
+            "order_type": "market_order",
+            "stop_price": str(
+                round(stop_price, 8)
+            )
+        },
 
-        "take_profit_order": take_profit_order,
+        "take_profit_order": {
+            "order_type": "limit_order",
+            "limit_price": str(
+                round(take_price, 8)
+            )
+        },
 
         "bracket_stop_trigger_method": "mark_price"
     }
@@ -581,20 +520,19 @@ def place_bracket(
         "POST",
         "/v2/orders/bracket",
         body=body,
-        auth=True
+        authenticated=True
     )
 
-    if not data.get("success", False):
-
+    if not data.get("success"):
         raise Exception(
-            f"Bracket failed: {data}"
+            "Bracket failed: " + str(data)
         )
 
     return data.get("result", {})
 
 
 # ============================================================
-# ORDER EXECUTION
+# TRADE
 # ============================================================
 
 def execute_trade(symbol, signal):
@@ -605,504 +543,363 @@ def execute_trade(symbol, signal):
 
     if not product_id:
         raise Exception(
-            "Product ID missing"
+            "Product ID not found"
         )
 
-    # Check existing position
-    position = get_position(
-        product_id
-    )
+    position = get_position(product_id)
 
-    current_size = get_position_size(
-        position
-    )
+    size = position_size(position)
 
-    if abs(current_size) > 0:
+    if abs(size) > 0:
 
-        log(
-            f"POSITION ACTIVE: {current_size}. "
-            f"New trade blocked."
+        add_log(
+            "Existing position detected. "
+            "New trade blocked."
         )
 
-        return {
-            "status": "blocked",
-            "reason": "existing_position"
-        }
+        return
 
-    if signal not in ["BUY", "SELL"]:
-
-        return {
-            "status": "no_trade"
-        }
-
-    # Cooldown
-    now = time.time()
+    current_time = time.time()
 
     if (
-        now - st.session_state.last_trade_time
+        current_time
+        - st.session_state.last_trade_time
         < COOLDOWN_SECONDS
     ):
 
-        remaining = int(
-            COOLDOWN_SECONDS
-            - (
-                now
-                - st.session_state.last_trade_time
-            )
-        )
+        add_log("Cooldown active.")
 
-        log(
-            f"COOLDOWN active: {remaining}s"
-        )
+        return
 
-        return {
-            "status": "cooldown"
-        }
+    if signal == "BUY":
 
-    side = (
-        "buy"
-        if signal == "BUY"
-        else "sell"
+        side = "buy"
+
+    elif signal == "SELL":
+
+        side = "sell"
+
+    else:
+
+        add_log("NO_TRADE")
+
+        return
+
+    add_log(
+        "REAL ORDER: "
+        + signal
+        + " | "
+        + symbol
+        + " | SIZE="
+        + str(LOT_SIZE)
     )
 
-    log(
-        f"🚀 REAL ORDER: {signal} | "
-        f"{symbol} | SIZE={LOT_SIZE}"
-    )
-
-    # Market order
-    order = place_market_order(
+    order = market_order(
         symbol,
         side
     )
 
     st.session_state.last_trade_time = time.time()
-    st.session_state.last_order = order
 
-    log(
-        f"MARKET ORDER SUCCESS: {order}"
+    add_log(
+        "MARKET ORDER SUCCESS"
     )
 
-    # Give exchange a moment
+    st.write("Order result:")
+    st.json(order)
+
     time.sleep(1)
 
-    # Get ticker after order
     ticker = get_ticker(symbol)
 
-    entry_price = (
-        ticker.get("mark_price")
-        or ticker.get("close")
-        or ticker.get("last_price")
-    )
+    entry = ticker.get("mark_price")
 
-    if entry_price:
+    if not entry:
+        entry = ticker.get("close")
+
+    if entry:
 
         try:
 
-            bracket = place_bracket(
+            bracket = create_bracket(
                 symbol,
                 side,
-                float(entry_price)
+                entry
             )
 
-            log(
-                f"🛡 SL/TP BRACKET SUCCESS: "
-                f"{bracket}"
+            add_log(
+                "SL/TP BRACKET SUCCESS"
             )
 
-        except Exception as e:
+            st.write("Bracket result:")
+            st.json(bracket)
 
-            log(
-                f"⚠ MARKET ORDER FILLED BUT "
-                f"BRACKET ERROR: {e}"
+        except Exception as error:
+
+            add_log(
+                "BRACKET ERROR: "
+                + str(error)
             )
 
-    else:
+            st.error(
+                "Market order placed, "
+                "but bracket failed: "
+                + str(error)
+            )
 
-        log(
-            "⚠ Entry price unavailable; "
-            "bracket was not created."
+
+# ============================================================
+# SCAN
+# ============================================================
+
+def scan_market():
+
+    add_log(
+        "Scanning " + SYMBOL
+    )
+
+    product = get_product(SYMBOL)
+
+    if not product:
+        raise Exception(
+            "ARCUSD product not found"
         )
 
-    return {
-        "status": "executed",
-        "order": order
-    }
+    df = get_candles(SYMBOL)
+
+    if df.empty:
+        raise Exception(
+            "No candle data"
+        )
+
+    last_price = df.iloc[-1]["close"]
+
+    st.metric(
+        "ARCUSD Price",
+        str(last_price)
+    )
+
+    signal = get_ai_signal(df)
+
+    st.session_state.last_signal = signal
+
+    add_log(
+        "AI SIGNAL = " + signal
+    )
+
+    if signal == "NO_TRADE":
+
+        add_log(
+            "No trade."
+        )
+
+        return
+
+    execute_trade(
+        SYMBOL,
+        signal
+    )
 
 
 # ============================================================
 # API TEST
 # ============================================================
 
-def test_api():
+def test_delta():
 
-    data = delta_request(
+    return delta_request(
         "GET",
         "/v2/orders",
         params={
             "page_size": 1
         },
-        auth=True
+        authenticated=True
     )
-
-    return data
-
-
-# ============================================================
-# AUTO SCAN
-# ============================================================
-
-def run_one_scan(symbol):
-
-    log(
-        f"🔎 Scanning {symbol}..."
-    )
-
-    # Product
-    product = get_product(symbol)
-
-    log(
-        f"PRODUCT OK: {symbol} "
-        f"(ID={product.get('id')})"
-    )
-
-    # Candles
-    df = get_candles(symbol)
-
-    if df.empty:
-
-        log(
-            "No candle data."
-        )
-
-        return
-
-    last_close = df.iloc[-1]["close"]
-
-    log(
-        f"PRICE: {last_close}"
-    )
-
-    # AI
-    signal = get_ai_signal(df)
-
-    st.session_state.last_signal = signal
-
-    log(
-        f"🤖 AI SIGNAL: {signal}"
-    )
-
-    if signal == "NO_TRADE":
-
-        log(
-            "No trade."
-        )
-
-        return
-
-    # Execute
-    result = execute_trade(
-        symbol,
-        signal
-    )
-
-    log(
-        f"EXECUTION RESULT: {result.get('status')}"
-    )
-
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-st.sidebar.header("⚙ SETTINGS")
-
-symbol = st.sidebar.text_input(
-    "Symbol",
-    value=DEFAULT_SYMBOL
-).upper().strip()
-
-st.sidebar.write(
-    f"**Timeframe:** {TIMEFRAME}"
-)
-
-st.sidebar.write(
-    f"**Lot Size:** {LOT_SIZE}"
-)
-
-st.sidebar.write(
-    f"**SL:** {SL_PERCENT * 100:.2f}%"
-)
-
-st.sidebar.write(
-    f"**TP:** {TP_PERCENT * 100:.2f}%"
-)
-
-st.sidebar.write(
-    f"**Scan:** {SCAN_SECONDS}s"
-)
-
-st.sidebar.write(
-    f"**Cooldown:** {COOLDOWN_SECONDS}s"
-)
 
 
 # ============================================================
 # STATUS
 # ============================================================
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3 = st.columns(3)
 
 with col1:
 
     if DELTA_API_KEY and DELTA_API_SECRET:
-        st.success("Delta API: READY")
+        st.success("Delta API READY")
     else:
-        st.error("Delta API: MISSING")
-
+        st.error("Delta API MISSING")
 
 with col2:
 
     if GROQ_API_KEY:
-        st.success("Groq AI: READY")
+        st.success("Groq READY")
     else:
-        st.error("Groq AI: MISSING")
-
+        st.error("Groq API MISSING")
 
 with col3:
 
-    st.metric(
-        "Last Signal",
-        st.session_state.last_signal
-    )
-
-
-with col4:
-
-    st.metric(
-        "Lot Size",
-        LOT_SIZE
+    st.info(
+        "LOT SIZE = " + str(LOT_SIZE)
     )
 
 
 # ============================================================
-# BUTTONS
+# CONTROL
 # ============================================================
 
-st.subheader("🎮 Control")
+st.subheader("Control Panel")
 
-c1, c2, c3 = st.columns(3)
+col1, col2 = st.columns(2)
 
-with c1:
-
-    test_button = st.button(
-        "🔐 Test Delta API",
-        use_container_width=True
-    )
-
-with c2:
-
-    scan_button = st.button(
-        "⚡ Scan + Trade Now",
-        use_container_width=True
-    )
-
-with c3:
+with col1:
 
     if st.button(
-        "🛑 STOP AUTO",
+        "🔐 TEST DELTA API",
         use_container_width=True
     ):
 
-        st.session_state.running = False
+        try:
 
-        log(
-            "🛑 AUTO SCALPER STOPPED"
-        )
+            result = test_delta()
 
+            st.success(
+                "Delta API authentication OK"
+            )
 
-# ============================================================
-# TEST API
-# ============================================================
+            st.json(result)
 
-if test_button:
+            add_log(
+                "Delta API TEST SUCCESS"
+            )
 
-    try:
+        except Exception as error:
 
-        result = test_api()
+            st.error(
+                "Delta API ERROR: "
+                + str(error)
+            )
 
-        st.success(
-            "✅ Delta authenticated API working"
-        )
-
-        st.json(result)
-
-        log(
-            "Delta API authentication SUCCESS"
-        )
-
-    except Exception as e:
-
-        st.error(
-            f"❌ Delta API ERROR: {e}"
-        )
-
-        log(
-            f"Delta API ERROR: {e}"
-        )
+            add_log(
+                "Delta API ERROR: "
+                + str(error)
+            )
 
 
-# ============================================================
-# MANUAL SCAN
-# ============================================================
+with col2:
 
-if scan_button:
-
-    try:
-
-        run_one_scan(symbol)
-
-        st.success(
-            "Scan completed."
-        )
-
-    except Exception as e:
-
-        st.error(
-            f"Scan error: {e}"
-        )
-
-        log(
-            f"SCAN ERROR: {e}"
-        )
-
-
-# ============================================================
-# AUTO START
-# ============================================================
-
-st.subheader("🤖 Automatic Scalping")
-
-auto_start = st.checkbox(
-    "START AUTOMATIC SCALPING",
-    value=st.session_state.running
-)
-
-if auto_start:
-
-    st.session_state.running = True
-
-else:
-
-    st.session_state.running = False
-
-
-if st.session_state.running:
-
-    st.warning(
-        "⚠ AUTO MODE ACTIVE — REAL ORDERS CAN BE PLACED"
-    )
-
-    placeholder = st.empty()
-
-    while st.session_state.running:
-
-        cycle_start = time.time()
+    if st.button(
+        "⚡ SCAN + REAL TRADE",
+        use_container_width=True
+    ):
 
         try:
 
-            run_one_scan(symbol)
+            scan_market()
 
-        except Exception as e:
-
-            log(
-                f"AUTO ERROR: {e}"
+            st.success(
+                "Scan completed"
             )
 
-        # Show logs
-        with placeholder.container():
+        except Exception as error:
 
-            st.write(
-                f"### 🔄 AUTO SCANNER — {symbol}"
+            st.error(
+                "Scan ERROR: "
+                + str(error)
             )
 
-            st.write(
-                f"Next scan in approximately "
-                f"{SCAN_SECONDS} seconds"
+            add_log(
+                "SCAN ERROR: "
+                + str(error)
             )
 
-            if st.session_state.logs:
 
-                st.code(
-                    "\n".join(
-                        st.session_state.logs[:30]
-                    )
-                )
+# ============================================================
+# AUTO MODE
+# ============================================================
 
-        elapsed = (
-            time.time()
-            - cycle_start
-        )
+st.subheader("🤖 AUTO SCALPING")
 
-        sleep_time = max(
-            1,
-            SCAN_SECONDS - elapsed
-        )
+auto_mode = st.checkbox(
+    "START AUTO SCALPING"
+)
+
+if auto_mode:
+
+    st.warning(
+        "REAL TRADING ACTIVE"
+    )
+
+    st.write(
+        "Scanner runs every "
+        + str(SCAN_SECONDS)
+        + " seconds."
+    )
+
+    while True:
+
+        try:
+
+            scan_market()
+
+        except Exception as error:
+
+            add_log(
+                "AUTO ERROR: "
+                + str(error)
+            )
+
+            st.error(
+                "AUTO ERROR: "
+                + str(error)
+            )
 
         time.sleep(
-            sleep_time
+            SCAN_SECONDS
         )
 
         st.rerun()
 
 
 # ============================================================
-# MARKET DATA
+# LIVE DATA
 # ============================================================
 
-st.subheader("📊 Live Market Data")
+st.subheader("📊 Live Market")
 
 try:
 
-    ticker = get_ticker(symbol)
+    ticker = get_ticker(SYMBOL)
 
-    t1, t2, t3, t4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
 
-    with t1:
-        st.metric(
-            "Symbol",
-            symbol
-        )
+    with col1:
 
-    with t2:
-        st.metric(
-            "Last Price",
+        st.write("Symbol")
+        st.write(SYMBOL)
+
+    with col2:
+
+        st.write("Last Price")
+        st.write(
             ticker.get(
                 "close",
                 "N/A"
             )
         )
 
-    with t3:
-        st.metric(
-            "Mark Price",
+    with col3:
+
+        st.write("Mark Price")
+        st.write(
             ticker.get(
                 "mark_price",
                 "N/A"
             )
         )
 
-    with t4:
-        st.metric(
-            "Volume",
-            ticker.get(
-                "volume",
-                "N/A"
-            )
-        )
-
-except Exception as e:
+except Exception as error:
 
     st.error(
-        f"Ticker error: {e}"
-   
+        "Ticker ERROR: "
+        + str
