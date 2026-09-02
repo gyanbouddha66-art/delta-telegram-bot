@@ -40,7 +40,6 @@ def fetch_delta_market_data(target_symbol, p_map):
     try:
         product_id = p_map.get(target_symbol)
         
-        # 1. पहले डायरेक्ट डेल्टा REST API से कैंडल लाने की कोशिश करें
         if product_id:
             candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=10"
             candle_res = requests.get(candles_url).json()
@@ -50,7 +49,6 @@ def fetch_delta_market_data(target_symbol, p_map):
                 df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
                 return df.to_string(), target_symbol
 
-        # 2. अगर REST API से न मिले, तो CCXT के ज़रिए OHLCV डेटा फेच करें (पक्का उपाय)
         exchange = ccxt.delta({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
         exchange.load_markets()
         
@@ -86,7 +84,7 @@ def run_scalp_ai(market_data, symbol):
     """
     response = client.chat.completions.create(
         messages=[{"role": "user", "content": prompt}],
-        model="llama3-8b-8192", 
+        model="llama-3.1-8b-instant",  # अपडेटेड मॉडल नाम
     )
     return response.choices[0].message.content.strip()
 
