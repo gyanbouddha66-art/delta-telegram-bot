@@ -154,7 +154,7 @@ def get_candles():
 
 
 # ============================================================
-# AI SIGNAL (Groq)
+# AI SIGNAL (Groq with Fallback Models)
 # ============================================================
 
 def get_signal(candles):
@@ -185,24 +185,35 @@ CANDLES:
 """
 
     client = Groq(api_key=GROQ_API_KEY)
+    
+    models_to_try = [
+        "llama-3.1-8b-instant",
+        "llama3-8b-8192",
+        "llama-3.3-70b-versatile"
+    ]
 
-    result = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
-        max_tokens=5
-    )
+    for model_name in models_to_try:
+        try:
+            result = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+                max_tokens=5
+            )
 
-    answer = (
-        result.choices[0]
-        .message
-        .content
-        .strip()
-        .upper()
-    )
+            answer = (
+                result.choices[0]
+                .message
+                .content
+                .strip()
+                .upper()
+            )
 
-    if answer in ("BUY", "SELL"):
-        return answer
+            if answer in ("BUY", "SELL", "NO_TRADE"):
+                return answer
+        except Exception:
+            continue
+
     return "NO_TRADE"
 
 
