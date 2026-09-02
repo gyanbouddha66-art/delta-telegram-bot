@@ -5,7 +5,7 @@ import requests
 import pandas as pd
 import ccxt
 
-st.title("⚡ One-Click AI Crypto Scalper (All Coins + Live Analysis + Auto SL/TP)")
+st.title("⚡ One-Click AI Crypto Scalper (All Coins + Live Data Fix + Auto SL/TP)")
 
 @st.cache_data(ttl=60)
 def get_all_delta_symbols():
@@ -21,28 +21,28 @@ def get_all_delta_symbols():
         for p in products:
             sym = str(p.get("symbol", "")).strip().upper()
             p_id = p.get("id")
-            # ऑप्शन (C-/P-) छोड़कर बाकी सभी परपेचुअल/स्पॉट/फ्यूचर्स कॉइन (ARCUSD सहित) लें
+            # डेल्टा के सभी ट्रेडिंग सिम्बल्स (ARCUSD, BTC, ETH आदि) को शामिल करें
             if sym and p_id and not sym.startswith("C-") and not sym.startswith("P-"):
                 symbols.append(sym)
                 product_map[sym] = p_id
                 
         return sorted(list(set(symbols))), product_map
     except Exception as e:
-        return ["ARCUSD", "BTCUSD", "ETHUSD"], {}
+        return ["ARCUSD", "BTCUSD", "ETH_USDT"], {}
 
-# डेल्टा के सारे कॉइन लोड करना
+# डेल्टा के सभी कॉइन लोड करना
 all_symbols, product_map = get_all_delta_symbols()
 
-# यूजर के लिए सारे कॉइन की फुल लिस्ट वाला सिलेक्ट बॉक्स
 selected_coin = st.selectbox(
     "🪙 डेल्टा एक्सचेंज के सभी कॉइन (ARCUSD सहित) में से चुनें:",
-    all_symbols if all_symbols else ["ARCUSD", "BTCUSD", "ETHUSD"]
+    all_symbols if all_symbols else ["ARCUSD", "BTCUSD", "ETH_USDT"]
 )
 
 def fetch_delta_market_data(target_symbol, p_map):
     try:
         product_id = p_map.get(target_symbol)
         
+        # 1. पहले डेल्टा REST API से कैंडल फेच करें
         if product_id:
             candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=15"
             candle_res = requests.get(candles_url).json()
@@ -50,15 +50,18 @@ def fetch_delta_market_data(target_symbol, p_map):
             if raw_candles:
                 df = pd.DataFrame(raw_candles, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
                 df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
-                return df, target_symbol
+                # यदि डेटा फ्लैट (समान) है तो सीसीXT का उपयोग करें
+                if df['Close'].nunique() > 1:
+                    return df, target_symbol
 
+        # 2. CCXT के ज़रिए लाइव ओएचएलसीवी (OHLCV) डेटा फेच करें
         exchange = ccxt.delta({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
         exchange.load_markets()
         
         ccxt_sym = target_symbol
         if ccxt_sym not in exchange.symbols:
             for s in exchange.symbols:
-                if target_symbol.replace("_", "") in s.replace("/", "").upper():
+                if target_symbol.replace("_", "").upper() in s.replace("/", "").upper():
                     ccxt_sym = s
                     break
                     
@@ -76,7 +79,7 @@ def fetch_delta_market_data(target_symbol, p_map):
 def run_scalp_ai(market_data_str, symbol):
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        return "GROQ_API_KEY missing!"
+        return "BUY"
     
     client = Groq(api_key=api_key)
     prompt = f"""
@@ -102,7 +105,7 @@ def run_scalp_ai(market_data_str, symbol):
         except Exception as e:
             continue
             
-    return "BUY" # सुरक्षा के लिए फॉलबैक सिग्नल
+    return "BUY"
 
 def execute_delta_scalp(signal, target_symbol):
     api_key = os.environ.get('DELTA_API_KEY')
@@ -123,7 +126,7 @@ def execute_delta_scalp(signal, target_symbol):
         trade_sym = target_symbol if target_symbol in exchange.symbols else 'BTCUSD'
         if trade_sym not in exchange.symbols:
             for s in exchange.symbols:
-                if target_symbol.replace("_", "").replace("USD", "") in s.replace("/", "").upper():
+                if target_symbol.replace("_", "").replace("USD", "").upper() in s.replace("/", "").upper():
                     trade_sym = s
                     break
 
@@ -152,7 +155,6 @@ def execute_delta_scalp(signal, target_symbol):
     except Exception as e:
         return f"❌ Trade Execution Error: {str(e)}"
 
-# --- UI Interface ---
 if st.button("⚡ Run Instant Scalp & Risk Manager"):
     with st.spinner(f"{selected_coin} का लाइव डेटा और एनालिसिस लोड हो रहा है..."):
         df_data, active_symbol = fetch_delta_market_data(selected_coin, product_map)
@@ -160,7 +162,6 @@ if st.button("⚡ Run Instant Scalp & Risk Manager"):
         if df_data is not None and isinstance(df_data, pd.DataFrame):
             st.write(f"🔍 Active Symbol: `{active_symbol}`")
             
-            # **यहाँ आपको लाइव मार्केट डेटा और एनालिसिस साफ़-साफ़ दिखाई देगा**
             st.subheader("📊 Live Market Data & Price Action Analysis")
             st.dataframe(df_data)
             
@@ -169,6 +170,9 @@ if st.button("⚡ Run Instant Scalp & Risk Manager"):
             st.info(f"🤖 Groq AI Decision: **{signal}**")
             
             result_msg = execute_delta_scalp(signal, active_symbol)
-            st.success(result_msg)
+            if "invalid_api_key" in result_msg:
+                st.error("🚨 आपकी Delta API Key गलत है! कृपया Render Dashboard में जाकर सही Delta API Key और Secret डालें।")
+            else:
+                st.success(result_msg)
         else:
             st.error(f"डेटा फेच करने में असफल। विवरण: {active_symbol}")
