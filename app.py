@@ -11,39 +11,38 @@ timeframe = "1m"
 
 def fetch_delta_market_data():
     try:
-        # डेल्टा एक्सचेंज के पब्लिक API से सीधे ARCUSD का डेटा लेना
-        url = "https://api.delta.exchange/v2/history/candles"
-        
-        # पहले हम सिंबल की डिटेल या सीधे प्रोडक्ट आईडी ढूंढते हैं, या डायरेक्ट कैंडल एंडपॉइंट हिट करते हैं
-        # डेल्टा पर ARCUSD का कॉन्ट्रैक्ट ढूंढने के लिए प्रोडक्ट्स लिस्ट फेच करते हैं
         prod_url = "https://api.delta.exchange/v2/products"
         response = requests.get(prod_url).json()
         
         product_id = None
         contract_symbol = "ARCUSD"
         
-        if "result" in response:
-            for p in response["result"]:
-                if p.get("symbol") == "ARCUSD" or "ARC" in p.get("symbol", ""):
-                    product_id = p.get("id")
-                    contract_symbol = p.get("symbol")
-                    break
-                    
-        if not product_id:
-            return None, "ഡెल्टा एक्सचेंज पर ARCUSD प्रोडक्ट आईडी नहीं मिली।"
+        products = response.get("result", [])
+        if not products and isinstance(response, list):
+            products = response
             
-        # अब उस प्रोडक्ट आईडी के लिए 1 मिनट की कैंडल फेच करना
+        # सभी प्रोडक्ट्स में 'ARC' को सिंबल, बेस एसेट या डिसक्रिप्शन में खोजना
+        for p in products:
+            sym = str(p.get("symbol", "")).upper()
+            base = str(p.get("base_asset", "")).upper()
+            desc = str(p.get("description", "")).upper()
+            
+            if "ARC" in sym or "ARC" in base or "ARC" in desc:
+                product_id = p.get("id")
+                contract_symbol = p.get("symbol", "ARCUSD")
+                break
+                
+        if not product_id:
+            return None, f"डेल्टा पर ARC आधारित प्रोडक्ट नहीं मिला। (कुल प्रोडक्ट्स: {len(products)})"
+            
         candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=5"
         candle_res = requests.get(candles_url).json()
         
-        if "result" not in candle_res or not candle_res["result"]:
-            return None, f"कैंडल डेटा फेच करने में असफल for {contract_symbol}"
+        raw_candles = candle_res.get("result", [])
+        if not raw_candles:
+            return None, f"कैंडल डेटा खाली है for product_id: {product_id}"
             
-        # डेल्टा कैंडल फॉर्मेट: [time, open, high, low, close, volume]
-        raw_candles = candle_res["result"]
         df = pd.DataFrame(raw_candles, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        
-        # डेटा को सही फॉर्मेट में बदलना
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
         return df.to_string(), contract_symbol
         
@@ -76,7 +75,6 @@ def execute_delta_scalp_with_ccxt(signal, target_symbol):
         return "❌ Delta API Keys missing in Render environment variables!"
         
     try:
-        # आर्डर लगाने के लिए CCXT का उपयोग सुरक्षित है क्योंकि बाजार लोड करने की बजाय सीधा सिंबल पास कर रहे हैं
         exchange = ccxt.delta({
             'apiKey': api_key, 
             'secret': api_secret, 
