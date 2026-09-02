@@ -6,8 +6,6 @@ import pandas as pd
 
 st.title("⚡ ArcUSD Pro Scalper (CCXT Live + Auto SL/TP)")
 
-# --- Settings ---
-# डेल्टा एक्सचेंज पर परपेचुअल के लिए सही सिंबल फॉर्मेट
 timeframe = "1m"     # 1 मिनट का स्कैल्पिंग फ्रेम
 
 def fetch_ccxt_market_data():
@@ -15,15 +13,23 @@ def fetch_ccxt_market_data():
         exchange = ccxt.delta({'enableRateLimit': True})
         exchange.load_markets()
         
-        # डेल्टा एक्सचेंज पर सही सिंबल ऑटोमैटिक खोजना
+        # डेल्टा एक्सचेंज पर सही सिंबल खोजना
+        possible_symbols = ['ARCUSD', 'ARC/USD:USD', 'ARC/USD', 'ARC/USDT']
         target_symbol = None
-        for s in exchange.symbols:
-            if 'ARC' in s.upper() and ('USD' in s.upper()):
+        
+        for s in possible_symbols:
+            if s in exchange.symbols:
                 target_symbol = s
                 break
-        
+                
         if not target_symbol:
-            target_symbol = "ARC/USD:USD"  # फॉールबैक सिंबल
+            for s in exchange.symbols:
+                if 'ARC' in s.upper():
+                    target_symbol = s
+                    break
+                    
+        if not target_symbol:
+            return None, "कोई भी ARC सिंबल नहीं मिला।"
             
         ohlcv = exchange.fetch_ohlcv(target_symbol, timeframe=timeframe, limit=5)
         if not ohlcv:
@@ -69,18 +75,18 @@ def execute_delta_scalp_with_risk(signal, target_symbol):
         ticker_info = exchange.fetch_ticker(target_symbol)
         current_price = ticker_info['last']
         
-        amount = 10  # अपनी पोजीशन साइज
+        amount = 10  # पोजीशन साइज
         sl_percentage = 0.005  # 0.5% SL
         tp_percentage = 0.01   # 1.0% TP
         
         if "BUY" in signal.upper():
-            order = exchange.create_market_buy_order(target_symbol, amount)
+            exchange.create_market_buy_order(target_symbol, amount)
             sl_price = current_price * (1 - sl_percentage)
             tp_price = current_price * (1 + tp_percentage)
             return f"✅ Scalp BUY Executed on {target_symbol} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
             
         elif "SELL" in signal.upper():
-            order = exchange.create_market_sell_order(target_symbol, amount)
+            exchange.create_market_sell_order(target_symbol, amount)
             sl_price = current_price * (1 + sl_percentage)
             tp_price = current_price * (1 - tp_percentage)
             return f"✅ Scalp SELL Executed on {target_symbol} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
@@ -103,4 +109,4 @@ if st.button("⚡ Run Instant Scalp & Risk Manager"):
             result_msg = execute_delta_scalp_with_risk(signal, active_symbol)
             st.success(result_msg)
         else:
-            st.error(f"डेटा फेच करने में असफल। एरर: {active_symbol}")
+            st.error(f"डेटा फेच करने में असफल। विवरण: {active_symbol}")
