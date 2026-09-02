@@ -8,43 +8,39 @@ import ccxt
 st.title("⚡ ArcUSD Pro Scalper (Direct API + Auto SL/TP)")
 
 timeframe = "1m"
+TARGET_SYMBOL = "ARCUSD"
 
 def fetch_delta_market_data():
     try:
+        # सीधे डेल्टा के प्रोडक्ट्स से ARCUSD की प्रोडक्ट आईडी ढूंढना
         prod_url = "https://api.delta.exchange/v2/products"
         response = requests.get(prod_url).json()
         
         product_id = None
-        contract_symbol = "ARCUSD"
-        
         products = response.get("result", [])
         if not products and isinstance(response, list):
             products = response
             
-        # सभी प्रोडक्ट्स में 'ARC' को सिंबल, बेस एसेट या डिसक्रिप्शन में खोजना
         for p in products:
             sym = str(p.get("symbol", "")).upper()
-            base = str(p.get("base_asset", "")).upper()
-            desc = str(p.get("description", "")).upper()
-            
-            if "ARC" in sym or "ARC" in base or "ARC" in desc:
+            if sym == TARGET_SYMBOL or "ARC" in sym:
                 product_id = p.get("id")
-                contract_symbol = p.get("symbol", "ARCUSD")
                 break
                 
         if not product_id:
-            return None, f"डेल्टा पर ARC आधारित प्रोडक्ट नहीं मिला। (कुल प्रोडक्ट्स: {len(products)})"
+            return None, f"डेल्टा पर {TARGET_SYMBOL} की प्रोडक्ट आईडी नहीं मिली।"
             
+        # 1 मिनट की कैंडल फेच करना
         candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=5"
         candle_res = requests.get(candles_url).json()
         
         raw_candles = candle_res.get("result", [])
         if not raw_candles:
-            return None, f"कैंडल डेटा खाली है for product_id: {product_id}"
+            return None, f"कैंडल डेटा खाली है for {TARGET_SYMBOL}"
             
         df = pd.DataFrame(raw_candles, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
-        return df.to_string(), contract_symbol
+        return df.to_string(), TARGET_SYMBOL
         
     except Exception as e:
         return None, str(e)
@@ -67,7 +63,7 @@ def run_scalp_ai(market_data):
     )
     return response.choices[0].message.content.strip()
 
-def execute_delta_scalp_with_ccxt(signal, target_symbol):
+def execute_delta_scalp(signal):
     api_key = os.environ.get('DELTA_API_KEY')
     api_secret = os.environ.get('DELTA_API_SECRET')
     
@@ -83,7 +79,16 @@ def execute_delta_scalp_with_ccxt(signal, target_symbol):
         })
         exchange.load_markets()
         
-        ticker_info = exchange.fetch_ticker(target_symbol)
+        # सीधे ARCUSD पर आर्डर प्लेस करना
+        symbol_to_trade = 'ARCUSD'
+        if symbol_to_trade not in exchange.symbols:
+            # अगर सीधा न मिले तो स्वैप फॉर्मेट खोजें
+            for s in exchange.symbols:
+                if 'ARC' in s.upper():
+                    symbol_to_trade = s
+                    break
+
+        ticker_info = exchange.fetch_ticker(symbol_to_trade)
         current_price = ticker_info['last']
         
         amount = 10  # पोजीशन साइज
@@ -91,16 +96,16 @@ def execute_delta_scalp_with_ccxt(signal, target_symbol):
         tp_percentage = 0.01   # 1.0% TP
         
         if "BUY" in signal.upper():
-            exchange.create_market_buy_order(target_symbol, amount)
+            exchange.create_market_buy_order(symbol_to_trade, amount)
             sl_price = current_price * (1 - sl_percentage)
             tp_price = current_price * (1 + tp_percentage)
-            return f"✅ Scalp BUY Executed on {target_symbol} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
+            return f"✅ Scalp BUY Executed on {symbol_to_trade} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
             
         elif "SELL" in signal.upper():
-            exchange.create_market_sell_order(target_symbol, amount)
+            exchange.create_market_sell_order(symbol_to_trade, amount)
             sl_price = current_price * (1 + sl_percentage)
             tp_price = current_price * (1 - tp_percentage)
-            return f"✅ Scalp SELL Executed on {target_symbol} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
+            return f"✅ Scalp SELL Executed on {symbol_to_trade} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
             
         else:
             return "⏳ Signal unclear. No trade placed."
@@ -110,14 +115,14 @@ def execute_delta_scalp_with_ccxt(signal, target_symbol):
 
 # --- UI Interface ---
 if st.button("⚡ Run Instant Scalp & Risk Manager"):
-    with st.spinner("डेल्टा एक्सचेंज डायरेक्ट API से लाइव डेटा फेच हो रहा है..."):
+    with st.spinner("डेल्टा एक्सचेंज से लाइव डेटा लिया जा रहा है..."):
         data, active_symbol = fetch_delta_market_data()
         if data:
             st.write(f"🔍 Active Symbol: `{active_symbol}`")
             signal = run_scalp_ai(data)
             st.info(f"🤖 AI Decision: **{signal}**")
             
-            result_msg = execute_delta_scalp_with_ccxt(signal, active_symbol)
+            result_msg = execute_delta_scalp(signal)
             st.success(result_msg)
         else:
             st.error(f"डेटा फेच करने में असफल। विवरण: {active_symbol}")
