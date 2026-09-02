@@ -7,24 +7,32 @@ import pandas as pd
 st.title("⚡ ArcUSD Pro Scalper (CCXT Live + Auto SL/TP)")
 
 # --- Settings ---
-# डेल्टा एक्सचेंज पर सही सिंबल फॉर्मेट का उपयोग करें (जैसे 'ARC/USDT' या 'ARC/USDT:USDT')
-symbol = "ARC/USDT"  
+# डेल्टा एक्सचेंज पर परपेचुअल के लिए सही सिंबल फॉर्मेट
 timeframe = "1m"     # 1 मिनट का स्कैल्पिंग फ्रेम
 
 def fetch_ccxt_market_data():
     try:
-        # CCXT के जरिए Delta Exchange से पब्लिक डेटा फेच करना
         exchange = ccxt.delta({'enableRateLimit': True})
+        exchange.load_markets()
         
-        # 1 मिनट की आखिरी 5 कैंडल्स मंगाना
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=5)
+        # डेल्टा एक्सचेंज पर सही सिंबल ऑटोमैटिक खोजना
+        target_symbol = None
+        for s in exchange.symbols:
+            if 'ARC' in s.upper() and ('USD' in s.upper()):
+                target_symbol = s
+                break
+        
+        if not target_symbol:
+            target_symbol = "ARC/USD:USD"  # फॉールबैक सिंबल
+            
+        ohlcv = exchange.fetch_ohlcv(target_symbol, timeframe=timeframe, limit=5)
         if not ohlcv:
-            return None
+            return None, target_symbol
             
         df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        return df[['Open', 'High', 'Low', 'Close', 'Volume']].to_string()
+        return df[['Open', 'High', 'Low', 'Close', 'Volume']].to_string(), target_symbol
     except Exception as e:
-        return None
+        return None, str(e)
 
 def run_scalp_ai(market_data):
     api_key = os.environ.get("GROQ_API_KEY")
@@ -32,21 +40,19 @@ def run_scalp_ai(market_data):
         return "GROQ_API_KEY missing!"
     
     client = Groq(api_key=api_key)
-    
     prompt = f"""
     You are an aggressive Crypto Scalping AI. Look at this 1-minute price action for ArcUSD:
     {market_data}
     Give an immediate scalp decision in one exact word:
     - BUY or SELL (No WAIT, give a clear direction based on momentum).
     """
-    
     response = client.chat.completions.create(
         messages=[{"role": "user", "content": prompt}],
         model="llama3-8b-8192", 
     )
     return response.choices[0].message.content.strip()
 
-def execute_delta_scalp_with_risk(signal):
+def execute_delta_scalp_with_risk(signal, target_symbol):
     api_key = os.environ.get('DELTA_API_KEY')
     api_secret = os.environ.get('DELTA_API_SECRET')
     
@@ -60,25 +66,24 @@ def execute_delta_scalp_with_risk(signal):
     })
     
     try:
-        ticker_info = exchange.fetch_ticker(symbol)
+        ticker_info = exchange.fetch_ticker(target_symbol)
         current_price = ticker_info['last']
         
-        amount = 10  # अपनी पोजीशन साइज यहाँ सेट करें
-        
+        amount = 10  # अपनी पोजीशन साइज
         sl_percentage = 0.005  # 0.5% SL
         tp_percentage = 0.01   # 1.0% TP
         
         if "BUY" in signal.upper():
-            order = exchange.create_market_buy_order(symbol, amount)
+            order = exchange.create_market_buy_order(target_symbol, amount)
             sl_price = current_price * (1 - sl_percentage)
             tp_price = current_price * (1 + tp_percentage)
-            return f"✅ Scalp BUY Executed at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
+            return f"✅ Scalp BUY Executed on {target_symbol} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
             
         elif "SELL" in signal.upper():
-            order = exchange.create_market_sell_order(symbol, amount)
+            order = exchange.create_market_sell_order(target_symbol, amount)
             sl_price = current_price * (1 + sl_percentage)
             tp_price = current_price * (1 - tp_percentage)
-            return f"✅ Scalp SELL Executed at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
+            return f"✅ Scalp SELL Executed on {target_symbol} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
             
         else:
             return "⏳ Signal unclear. No trade placed."
@@ -88,13 +93,14 @@ def execute_delta_scalp_with_risk(signal):
 
 # --- UI Interface ---
 if st.button("⚡ Run Instant Scalp & Risk Manager"):
-    with st.spinner("डेल्टा एक्सचेंज से लाइव डेटा लिया जा रहा है..."):
-        data = fetch_ccxt_market_data()
+    with st.spinner("डेल्टा एक्सचेंज से लाइव डेटा फेच हो रहा है..."):
+        data, active_symbol = fetch_ccxt_market_data()
         if data:
+            st.write(f"🔍 Active Symbol: `{active_symbol}`")
             signal = run_scalp_ai(data)
             st.info(f"🤖 AI Decision: **{signal}**")
             
-            result_msg = execute_delta_scalp_with_risk(signal)
+            result_msg = execute_delta_scalp_with_risk(signal, active_symbol)
             st.success(result_msg)
         else:
-            st.error("डेटा फेच करने में असफल। कृपया सुनिश्चित करें कि डेल्टा पर यह सिंबल 'ARC/USDT' सही रूप में मौजूद है।")
+            st.error(f"डेटा फेच करने में असफल। एरर: {active_symbol}")
