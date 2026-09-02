@@ -1,45 +1,52 @@
 import os
 import streamlit as st
 from groq import Groq
-import ccxt
+import requests
 import pandas as pd
+import ccxt
 
-st.title("⚡ ArcUSD Pro Scalper (CCXT Live + Auto SL/TP)")
+st.title("⚡ ArcUSD Pro Scalper (Direct API + Auto SL/TP)")
 
-timeframe = "1m"     # 1 मिनट का स्कैल्पिंग फ्रेम
+timeframe = "1m"
 
-def fetch_ccxt_market_data():
+def fetch_delta_market_data():
     try:
-        # डेरिवेटिव्स/परपेचुअल मार्केट्स के लिए defaultType 'swap' सेट किया गया है
-        exchange = ccxt.delta({
-            'enableRateLimit': True,
-            'options': {'defaultType': 'swap'}
-        })
-        exchange.load_markets()
+        # डेल्टा एक्सचेंज के पब्लिक API से सीधे ARCUSD का डेटा लेना
+        url = "https://api.delta.exchange/v2/history/candles"
         
-        possible_symbols = ['ARCUSD', 'ARC/USD:USD', 'ARC/USD', 'ARC/USDT']
-        target_symbol = None
+        # पहले हम सिंबल की डिटेल या सीधे प्रोडक्ट आईडी ढूंढते हैं, या डायरेक्ट कैंडल एंडपॉइंट हिट करते हैं
+        # डेल्टा पर ARCUSD का कॉन्ट्रैक्ट ढूंढने के लिए प्रोडक्ट्स लिस्ट फेच करते हैं
+        prod_url = "https://api.delta.exchange/v2/products"
+        response = requests.get(prod_url).json()
         
-        for s in possible_symbols:
-            if s in exchange.symbols:
-                target_symbol = s
-                break
-                
-        if not target_symbol:
-            for s in exchange.symbols:
-                if 'ARC' in s.upper():
-                    target_symbol = s
+        product_id = None
+        contract_symbol = "ARCUSD"
+        
+        if "result" in response:
+            for p in response["result"]:
+                if p.get("symbol") == "ARCUSD" or "ARC" in p.get("symbol", ""):
+                    product_id = p.get("id")
+                    contract_symbol = p.get("symbol")
                     break
                     
-        if not target_symbol:
-            return None, "कोई भी ARC सिंबल नहीं मिला।"
+        if not product_id:
+            return None, "ഡెल्टा एक्सचेंज पर ARCUSD प्रोडक्ट आईडी नहीं मिली।"
             
-        ohlcv = exchange.fetch_ohlcv(target_symbol, timeframe=timeframe, limit=5)
-        if not ohlcv:
-            return None, target_symbol
+        # अब उस प्रोडक्ट आईडी के लिए 1 मिनट की कैंडल फेच करना
+        candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=5"
+        candle_res = requests.get(candles_url).json()
+        
+        if "result" not in candle_res or not candle_res["result"]:
+            return None, f"कैंडल डेटा फेच करने में असफल for {contract_symbol}"
             
-        df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        return df[['Open', 'High', 'Low', 'Close', 'Volume']].to_string(), target_symbol
+        # डेल्टा कैंडल फॉर्मेट: [time, open, high, low, close, volume]
+        raw_candles = candle_res["result"]
+        df = pd.DataFrame(raw_candles, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+        
+        # डेटा को सही फॉर्मेट में बदलना
+        df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
+        return df.to_string(), contract_symbol
+        
     except Exception as e:
         return None, str(e)
 
@@ -61,21 +68,23 @@ def run_scalp_ai(market_data):
     )
     return response.choices[0].message.content.strip()
 
-def execute_delta_scalp_with_risk(signal, target_symbol):
+def execute_delta_scalp_with_ccxt(signal, target_symbol):
     api_key = os.environ.get('DELTA_API_KEY')
     api_secret = os.environ.get('DELTA_API_SECRET')
     
     if not api_key or not api_secret:
         return "❌ Delta API Keys missing in Render environment variables!"
         
-    exchange = ccxt.delta({
-        'apiKey': api_key, 
-        'secret': api_secret, 
-        'enableRateLimit': True,
-        'options': {'defaultType': 'swap'}
-    })
-    
     try:
+        # आर्डर लगाने के लिए CCXT का उपयोग सुरक्षित है क्योंकि बाजार लोड करने की बजाय सीधा सिंबल पास कर रहे हैं
+        exchange = ccxt.delta({
+            'apiKey': api_key, 
+            'secret': api_secret, 
+            'enableRateLimit': True,
+            'options': {'defaultType': 'swap'}
+        })
+        exchange.load_markets()
+        
         ticker_info = exchange.fetch_ticker(target_symbol)
         current_price = ticker_info['last']
         
@@ -103,14 +112,14 @@ def execute_delta_scalp_with_risk(signal, target_symbol):
 
 # --- UI Interface ---
 if st.button("⚡ Run Instant Scalp & Risk Manager"):
-    with st.spinner("डेल्टा एक्सचेंज से लाइव डेटा फेच हो रहा है..."):
-        data, active_symbol = fetch_ccxt_market_data()
+    with st.spinner("डेल्टा एक्सचेंज डायरेक्ट API से लाइव डेटा फेच हो रहा है..."):
+        data, active_symbol = fetch_delta_market_data()
         if data:
             st.write(f"🔍 Active Symbol: `{active_symbol}`")
             signal = run_scalp_ai(data)
             st.info(f"🤖 AI Decision: **{signal}**")
             
-            result_msg = execute_delta_scalp_with_risk(signal, active_symbol)
+            result_msg = execute_delta_scalp_with_ccxt(signal, active_symbol)
             st.success(result_msg)
         else:
             st.error(f"डेटा फेच करने में असफल। विवरण: {active_symbol}")
