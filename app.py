@@ -2,7 +2,9 @@ import os
 import time
 import hmac
 import hashlib
-import json
+from urllib.parse import urlencode
+from datetime import datetime, timezone
+
 import requests
 import pandas as pd
 import streamlit as st
@@ -10,39 +12,43 @@ from groq import Groq
 
 
 # ============================================================
-# GH ARCUSD REAL SCALPER
-# DELTA EXCHANGE INDIA V2
-# REAL DATA + REAL ORDER + REAL BRACKET SL/TP
-# ============================================================
-
-st.set_page_config(
-    page_title="GH ARCUSD Real Scalper",
-    page_icon="⚡",
-    layout="wide"
-)
-
-st.title("⚡ GH ARCUSD REAL CRYPTO SCALPER")
-
-# ============================================================
-# CONFIG
+# GH BOSS AI — DELTA AUTO SCALPER
+# ARCUSD | 1 MIN | LOT SIZE 1
 # ============================================================
 
 BASE_URL = "https://api.india.delta.exchange"
 
 DEFAULT_SYMBOL = "ARCUSD"
-
 TIMEFRAME = "1m"
-CANDLE_LIMIT = 30
 
-# REAL TRADING
-DEFAULT_ORDER_SIZE = 1
+LOT_SIZE = 1
+
+CANDLE_LIMIT = 50
 
 # Risk
 SL_PERCENT = 0.0050       # 0.50%
 TP_PERCENT = 0.0100       # 1.00%
 
-# Minimum gap between new trades
+# Automatic scan
+SCAN_SECONDS = 30
 COOLDOWN_SECONDS = 60
+
+REQUEST_TIMEOUT = 15
+
+
+# ============================================================
+# STREAMLIT
+# ============================================================
+
+st.set_page_config(
+    page_title="GH Boss AI Auto Scalper",
+    page_icon="⚡",
+    layout="wide"
+)
+
+st.title("⚡ GH BOSS AI — DELTA AUTO SCALPER")
+st.caption("Delta India • Direct REST API • ARCUSD • 1m • Lot Size 1")
+
 
 # ============================================================
 # ENVIRONMENT
@@ -54,134 +60,176 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
 
 # ============================================================
+# SESSION STATE
+# ============================================================
+
+if "last_trade_time" not in st.session_state:
+    st.session_state.last_trade_time = 0
+
+if "last_signal" not in st.session_state:
+    st.session_state.last_signal = "NONE"
+
+if "last_order" not in st.session_state:
+    st.session_state.last_order = None
+
+if "running" not in st.session_state:
+    st.session_state.running = False
+
+if "logs" not in st.session_state:
+    st.session_state.logs = []
+
+
+# ============================================================
+# LOG
+# ============================================================
+
+def log(message):
+    now = datetime.now().strftime("%H:%M:%S")
+    text = f"[{now}] {message}"
+
+    st.session_state.logs.insert(0, text)
+
+    # Keep only latest 100 logs
+    st.session_state.logs = st.session_state.logs[:100]
+
+
+# ============================================================
 # DELTA SIGNATURE
 # ============================================================
 
-def generate_signature(secret, method, timestamp, path, query_string="", payload=""):
+def make_signature(method, timestamp, path, query_string="", body=""):
     message = (
-        method.upper()
+        method
         + str(timestamp)
         + path
         + query_string
-        + payload
+        + body
     )
 
-    return hmac.new(
-        secret.encode("utf-8"),
+    signature = hmac.new(
+        DELTA_API_SECRET.encode("utf-8"),
         message.encode("utf-8"),
         hashlib.sha256
     ).hexdigest()
 
-
-# ============================================================
-# AUTH HEADERS
-# ============================================================
-
-def delta_headers(method, path, query_string="", payload=""):
-    if not DELTA_API_KEY or not DELTA_API_SECRET:
-        raise Exception(
-            "DELTA_API_KEY या DELTA_API_SECRET Render Environment Variables में missing है."
-        )
-
-    timestamp = str(int(time.time()))
-
-    signature = generate_signature(
-        DELTA_API_SECRET,
-        method,
-        timestamp,
-        path,
-        query_string,
-        payload
-    )
-
-    return {
-        "api-key": DELTA_API_KEY,
-        "timestamp": timestamp,
-        "signature": signature,
-        "User-Agent": "GH-ARCUSD-Scalper",
-        "Content-Type": "application/json",
-        "Accept": "application/json"
-    }
+    return signature
 
 
 # ============================================================
-# GENERIC DELTA REQUEST
+# DELTA REQUEST
 # ============================================================
 
 def delta_request(method, path, params=None, body=None, auth=False):
 
-    url = BASE_URL + path
-
     params = params or {}
 
-    query_string = ""
+    body = body or {}
 
-    if params:
-        query_parts = []
+    body_text = ""
 
-        for key, value in params.items():
-            query_parts.append(
-                f"{key}={value}"
-            )
-
-        query_string = "?" + "&".join(query_parts)
-
-    payload = ""
-
-    if body is not None:
-        payload = json.dumps(
+    if body:
+        import json
+        body_text = json.dumps(
             body,
             separators=(",", ":")
         )
 
-    try:
+    query_string = ""
 
-        if auth:
-            headers = delta_headers(
-                method,
-                path,
-                query_string,
-                payload
-            )
-        else:
-            headers = {
-                "Accept": "application/json"
-            }
-
-        response = requests.request(
-            method=method.upper(),
-            url=url,
-            params=params,
-            data=payload if body is not None else None,
-            headers=headers,
-            timeout=20
+    if params:
+        query_string = "?" + urlencode(
+            params,
+            doseq=True
         )
 
-        try:
-            data = response.json()
-        except Exception:
-            data = {
-                "raw_response": response.text
-            }
+    url = BASE_URL + path + query_string
 
-        return response.status_code, data
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": "GH-BOSS-AI-AUTO-SCALPER/1.0"
+    }
 
-    except Exception as e:
+    if auth:
 
-        return 0, {
+        if not DELTA_API_KEY or not DELTA_API_SECRET:
+            raise Exception(
+                "DELTA_API_KEY / DELTA_API_SECRET missing"
+            )
+
+        timestamp = int(time.time())
+
+        signature = make_signature(
+            method.upper(),
+            timestamp,
+            path,
+            query_string,
+            body_text
+        )
+
+        headers["api-key"] = DELTA_API_KEY
+        headers["timestamp"] = str(timestamp)
+        headers["signature"] = signature
+
+    response = requests.request(
+        method=method.upper(),
+        url=url,
+        headers=headers,
+        data=body_text if body else None,
+        timeout=REQUEST_TIMEOUT
+    )
+
+    try:
+        data = response.json()
+    except Exception:
+        data = {
             "success": False,
-            "error": str(e)
+            "http_status": response.status_code,
+            "raw": response.text
         }
 
+    if response.status_code >= 400:
+
+        raise Exception(
+            f"HTTP {response.status_code}: {data}"
+        )
+
+    return data
+
 
 # ============================================================
-# GET ALL DELTA PRODUCTS
+# PRODUCT
 # ============================================================
 
-@st.cache_data(ttl=60)
+def get_product(symbol):
+
+    data = delta_request(
+        "GET",
+        f"/v2/products/{symbol}"
+    )
+
+    if not data.get("success", False):
+        raise Exception(
+            f"Product error: {data}"
+        )
+
+    result = data.get("result")
+
+    if not result:
+        raise Exception(
+            f"Product not found: {symbol}"
+        )
+
+    return result
+
+
+# ============================================================
+# ALL PRODUCTS
+# ============================================================
+
 def get_all_products():
 
-    products = []
+    all_products = []
 
     after = None
 
@@ -194,835 +242,404 @@ def get_all_products():
         if after:
             params["after"] = after
 
-        status, data = delta_request(
+        data = delta_request(
             "GET",
             "/v2/products",
-            params=params,
-            auth=False
+            params=params
         )
 
-        if status != 200:
+        if not data.get("success", False):
             break
 
         result = data.get("result", [])
 
-        if not result:
+        if not isinstance(result, list):
             break
 
-        products.extend(result)
+        all_products.extend(result)
 
         meta = data.get("meta", {})
 
-        new_after = meta.get("after")
+        next_cursor = meta.get("next_cursor")
 
-        if not new_after or new_after == after:
+        if not next_cursor:
             break
 
-        after = new_after
+        after = next_cursor
 
-    # केवल live/tradable perpetual futures
-    tradable = []
-
-    for p in products:
-
-        symbol = str(
-            p.get("symbol", "")
-        ).upper().strip()
-
-        product_id = p.get("id")
-
-        product_type = str(
-            p.get("product_type", "")
-        ).lower()
-
-        state = str(
-            p.get("state", "")
-        ).lower()
-
-        if not symbol or not product_id:
-            continue
-
-        if symbol.startswith("C-"):
-            continue
-
-        if symbol.startswith("P-"):
-            continue
-
-        if "perpetual" not in product_type:
-            continue
-
-        if state and state not in ["live", "active"]:
-            continue
-
-        tradable.append({
-            "symbol": symbol,
-            "id": int(product_id),
-            "product_type": product_type
-        })
-
-    # remove duplicates
-    unique = {}
-
-    for p in tradable:
-        unique[p["symbol"]] = p
-
-    return sorted(
-        unique.values(),
-        key=lambda x: x["symbol"]
-    )
+    return all_products
 
 
 # ============================================================
-# FIND PRODUCT
-# ============================================================
-
-def find_product(symbol, products):
-
-    symbol = symbol.upper().strip()
-
-    for p in products:
-        if p["symbol"] == symbol:
-            return p
-
-    return None
-
-
-# ============================================================
-# GET 1 MINUTE CANDLES
+# CANDLES
 # ============================================================
 
 def get_candles(symbol):
 
-    end_time = int(time.time())
-
-    start_time = end_time - (
-        CANDLE_LIMIT * 60
-    )
+    end = int(time.time())
+    start = end - (CANDLE_LIMIT * 60)
 
     params = {
-        "resolution": TIMEFRAME,
+        "resolution": "1m",
         "symbol": symbol,
-        "start": start_time,
-        "end": end_time
+        "start": start,
+        "end": end
     }
 
-    status, data = delta_request(
+    data = delta_request(
         "GET",
         "/v2/history/candles",
-        params=params,
-        auth=False
+        params=params
     )
 
-    if status != 200:
-
-        return None, (
-            f"HTTP {status}: "
-            f"{json.dumps(data, ensure_ascii=False)}"
+    if not data.get("success", False):
+        raise Exception(
+            f"Candle error: {data}"
         )
 
-    candles = data.get("result", [])
+    rows = data.get("result", [])
 
-    if not candles:
-
-        return None, "Delta ने कोई candle data नहीं दिया."
-
-    rows = []
-
-    for c in candles:
-
-        rows.append({
-            "Time": pd.to_datetime(
-                c.get("time"),
-                unit="s"
-            ),
-            "Open": float(c.get("open", 0)),
-            "High": float(c.get("high", 0)),
-            "Low": float(c.get("low", 0)),
-            "Close": float(c.get("close", 0)),
-            "Volume": float(c.get("volume", 0))
-        })
+    if not rows:
+        return pd.DataFrame()
 
     df = pd.DataFrame(rows)
 
+    # Normalize possible timestamp field
+    if "time" in df.columns:
+
+        df["time"] = pd.to_datetime(
+            df["time"],
+            unit="s",
+            errors="coerce"
+        )
+
+    for col in ["open", "high", "low", "close", "volume"]:
+
+        if col in df.columns:
+            df[col] = pd.to_numeric(
+                df[col],
+                errors="coerce"
+            )
+
     df = df.sort_values(
-        "Time"
+        "time"
     ).reset_index(drop=True)
 
-    return df, None
+    return df
 
 
 # ============================================================
-# GET LIVE TICKER
+# TICKER
 # ============================================================
 
 def get_ticker(symbol):
 
-    status, data = delta_request(
+    data = delta_request(
         "GET",
-        f"/v2/tickers/{symbol}",
-        auth=False
+        f"/v2/tickers/{symbol}"
     )
 
-    if status != 200:
-        return None, data
+    if not data.get("success", False):
+        raise Exception(
+            f"Ticker error: {data}"
+        )
 
-    result = data.get("result", {})
-
-    price = (
-        result.get("close")
-        or result.get("last_price")
-        or result.get("spot_price")
-    )
-
-    if price is None:
-        return None, data
-
-    return float(price), None
+    return data.get("result", {})
 
 
 # ============================================================
-# TEST API AUTHENTICATION
-# ============================================================
-
-def test_delta_auth(product_id):
-
-    params = {
-        "product_id": product_id
-    }
-
-    status, data = delta_request(
-        "GET",
-        "/v2/positions",
-        params=params,
-        auth=True
-    )
-
-    return status, data
-
-
-# ============================================================
-# GET CURRENT POSITION
+# POSITION
 # ============================================================
 
 def get_position(product_id):
 
-    params = {
-        "product_id": product_id
-    }
-
-    status, data = delta_request(
+    data = delta_request(
         "GET",
         "/v2/positions",
-        params=params,
+        params={
+            "product_id": product_id
+        },
         auth=True
     )
 
-    if status != 200:
-
-        return None, (
-            f"HTTP {status}: "
-            f"{json.dumps(data, ensure_ascii=False)}"
+    if not data.get("success", False):
+        raise Exception(
+            f"Position error: {data}"
         )
 
     result = data.get("result")
 
-    if not result:
-        return 0, None
+    if isinstance(result, list):
 
-    size = result.get("size", 0)
+        if not result:
+            return None
+
+        return result[0]
+
+    return result
+
+
+# ============================================================
+# POSITION SIZE
+# ============================================================
+
+def get_position_size(position):
+
+    if not position:
+        return 0
+
+    value = position.get("size", 0)
 
     try:
-        return float(size), None
+        return float(value)
     except Exception:
-        return 0, None
+        return 0
 
 
 # ============================================================
-# GROQ AI
+# AI SIGNAL
 # ============================================================
 
-def run_ai(df, symbol):
+def get_ai_signal(df):
 
     if not GROQ_API_KEY:
+        raise Exception(
+            "GROQ_API_KEY missing"
+        )
 
-        return None, "GROQ_API_KEY missing"
+    if len(df) < 20:
+        return "NO_TRADE"
+
+    recent = df.tail(20).copy()
+
+    candle_text = ""
+
+    for _, row in recent.iterrows():
+
+        candle_text += (
+            f"O={row.get('open')} "
+            f"H={row.get('high')} "
+            f"L={row.get('low')} "
+            f"C={row.get('close')} "
+            f"V={row.get('volume')}\n"
+        )
+
+    prompt = f"""
+You are a strict crypto scalping decision engine.
+
+Symbol: ARCUSD
+Timeframe: 1 minute.
+
+Analyze the last 20 candles.
+
+Look for:
+- bullish/bearish price structure
+- momentum
+- consecutive candle direction
+- rejection
+- breakout/breakdown
+- volume confirmation
+- short-term trend
+
+You MUST choose exactly one:
+
+BUY
+SELL
+NO_TRADE
+
+Do not write anything else.
+
+Candles:
+{candle_text}
+"""
 
     client = Groq(
         api_key=GROQ_API_KEY
     )
 
-    recent = df.tail(20).copy()
-
-    recent["Return_%"] = (
-        recent["Close"]
-        .pct_change()
-        * 100
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        temperature=0,
+        max_tokens=10
     )
 
-    recent["EMA9"] = (
-        recent["Close"]
-        .ewm(span=9, adjust=False)
-        .mean()
+    answer = (
+        response.choices[0]
+        .message
+        .content
+        .strip()
+        .upper()
     )
 
-    recent["EMA21"] = (
-        recent["Close"]
-        .ewm(span=21, adjust=False)
-        .mean()
-    )
+    if "BUY" in answer:
+        return "BUY"
 
-    data_text = recent.to_string(
-        index=False
-    )
+    if "SELL" in answer:
+        return "SELL"
 
-    prompt = f"""
-You are a crypto 1-minute scalping decision engine.
-
-Symbol: {symbol}
-
-Analyze the latest 1-minute OHLCV data.
-
-Rules:
-
-1. Determine short-term momentum.
-2. Compare EMA9 and EMA21.
-3. Examine recent candle structure.
-4. Examine volume.
-5. Do NOT invent data.
-6. Do NOT give explanations.
-
-Return EXACTLY one word:
-
-BUY
-
-or
-
-SELL
-
-or
-
-NO_TRADE
-
-Market data:
-
-{data_text}
-"""
-
-    models = [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant"
-    ]
-
-    for model in models:
-
-        try:
-
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0
-            )
-
-            text = (
-                response
-                .choices[0]
-                .message
-                .content
-                .strip()
-                .upper()
-            )
-
-            if "BUY" == text:
-                return "BUY", None
-
-            if "SELL" == text:
-                return "SELL", None
-
-            if "NO_TRADE" == text:
-                return "NO_TRADE", None
-
-        except Exception:
-            continue
-
-    return None, "Groq AI decision failed."
+    return "NO_TRADE"
 
 
 # ============================================================
-# REAL MARKET ORDER
+# MARKET ORDER
 # ============================================================
 
 def place_market_order(
-    product,
-    side,
-    size
+    product_symbol,
+    side
 ):
 
-    product_id = product["id"]
-    symbol = product["symbol"]
-
     body = {
-        "product_id": product_id,
-        "size": int(size),
+        "product_symbol": product_symbol,
+        "size": LOT_SIZE,
         "side": side,
         "order_type": "market_order",
         "time_in_force": "ioc",
         "reduce_only": False,
         "post_only": False,
-        "client_order_id":
-            f"GH_{symbol}_{side}_{int(time.time())}"
+        "mmp": "disabled"
     }
 
-    status, data = delta_request(
+    data = delta_request(
         "POST",
         "/v2/orders",
         body=body,
         auth=True
     )
 
-    return status, data
+    if not data.get("success", False):
+        raise Exception(
+            f"Order failed: {data}"
+        )
+
+    return data.get("result", {})
 
 
 # ============================================================
-# BRACKET SL + TP
+# BRACKET ORDER
 # ============================================================
 
 def place_bracket(
-    product,
+    product_symbol,
     side,
     entry_price
 ):
 
-    symbol = product["symbol"]
-    product_id = product["id"]
+    entry_price = float(entry_price)
 
     if side == "buy":
 
-        sl_price = (
-            entry_price
-            * (1 - SL_PERCENT)
+        stop_price = entry_price * (
+            1 - SL_PERCENT
         )
 
-        tp_price = (
-            entry_price
-            * (1 + TP_PERCENT)
+        take_price = entry_price * (
+            1 + TP_PERCENT
         )
 
     else:
 
-        sl_price = (
-            entry_price
-            * (1 + SL_PERCENT)
+        stop_price = entry_price * (
+            1 + SL_PERCENT
         )
 
-        tp_price = (
-            entry_price
-            * (1 - TP_PERCENT)
+        take_price = entry_price * (
+            1 - TP_PERCENT
         )
 
-    # Delta bracket closes the open position.
-    body = {
-
-        "product_id": product_id,
-
-        "stop_loss_order": {
-            "order_type": "market_order",
-            "stop_price": str(
-                round(sl_price, 8)
-            )
-        },
-
-        "take_profit_order": {
-            "order_type": "market_order",
-            "stop_price": str(
-                round(tp_price, 8)
-            )
-        },
-
-        "bracket_stop_trigger_method":
-            "last_traded_price"
+    stop_loss_order = {
+        "order_type": "market_order",
+        "stop_price": str(
+            round(stop_price, 8)
+        )
     }
 
-    status, data = delta_request(
+    take_profit_order = {
+        "order_type": "limit_order",
+        "limit_price": str(
+            round(take_price, 8)
+        )
+    }
+
+    body = {
+        "product_symbol": product_symbol,
+
+        "stop_loss_order": stop_loss_order,
+
+        "take_profit_order": take_profit_order,
+
+        "bracket_stop_trigger_method": "mark_price"
+    }
+
+    data = delta_request(
         "POST",
         "/v2/orders/bracket",
         body=body,
         auth=True
     )
 
-    return status, data, sl_price, tp_price
+    if not data.get("success", False):
 
-
-# ============================================================
-# EXECUTE REAL TRADE
-# ============================================================
-
-def execute_trade(
-    product,
-    signal,
-    size
-):
-
-    symbol = product["symbol"]
-
-    # ------------------------------------
-    # Check existing position
-    # ------------------------------------
-
-    current_position, position_error = get_position(
-        product["id"]
-    )
-
-    if position_error:
-
-        return (
-            False,
-            f"Position check failed:\n{position_error}"
+        raise Exception(
+            f"Bracket failed: {data}"
         )
 
-    if current_position != 0:
+    return data.get("result", {})
 
-        return (
-            False,
-            f"Existing position detected: "
-            f"{current_position}. "
+
+# ============================================================
+# ORDER EXECUTION
+# ============================================================
+
+def execute_trade(symbol, signal):
+
+    product = get_product(symbol)
+
+    product_id = product.get("id")
+
+    if not product_id:
+        raise Exception(
+            "Product ID missing"
+        )
+
+    # Check existing position
+    position = get_position(
+        product_id
+    )
+
+    current_size = get_position_size(
+        position
+    )
+
+    if abs(current_size) > 0:
+
+        log(
+            f"POSITION ACTIVE: {current_size}. "
             f"New trade blocked."
         )
 
-    # ------------------------------------
-    # Direction
-    # ------------------------------------
+        return {
+            "status": "blocked",
+            "reason": "existing_position"
+        }
 
-    if signal == "BUY":
+    if signal not in ["BUY", "SELL"]:
 
-        side = "buy"
+        return {
+            "status": "no_trade"
+        }
 
-    elif signal == "SELL":
-
-        side = "sell"
-
-    else:
-
-        return (
-            False,
-            "NO_TRADE"
-        )
-
-    # ------------------------------------
-    # Get latest price
-    # ------------------------------------
-
-    price, ticker_error = get_ticker(
-        symbol
-    )
-
-    if price is None:
-
-        return (
-            False,
-            f"Ticker error: {ticker_error}"
-        )
-
-    # ------------------------------------
-    # Market order
-    # ------------------------------------
-
-    status, order_data = place_market_order(
-        product,
-        side,
-        size
-    )
-
-    if status < 200 or status >= 300:
-
-        return (
-            False,
-            "❌ MARKET ORDER FAILED\n\n"
-            + json.dumps(
-                order_data,
-                indent=2,
-                ensure_ascii=False
-            )
-        )
-
-    # ------------------------------------
-    # Bracket
-    # ------------------------------------
-
-    time.sleep(1)
-
-    bracket_status, bracket_data, sl, tp = (
-        place_bracket(
-            product,
-            side,
-            price
-        )
-    )
-
-    if bracket_status < 200 or bracket_status >= 300:
-
-        return (
-            True,
-            "⚠️ MARKET ORDER SUCCESSFUL\n"
-            "लेकिन BRACKET SL/TP लगाने में समस्या हुई.\n\n"
-            + json.dumps(
-                bracket_data,
-                indent=2,
-                ensure_ascii=False
-            )
-        )
-
-    return (
-        True,
-        f"""
-✅ REAL {signal} EXECUTED
-
-🪙 Symbol: {symbol}
-📌 Side: {side.upper()}
-💰 Approx Entry: {price}
-📦 Size: {size}
-
-🛑 SL: {sl:.8f}
-🎯 TP: {tp:.8f}
-
-✅ Delta Bracket SL/TP submitted.
-"""
-    )
-
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-
-if "last_trade_time" not in st.session_state:
-    st.session_state.last_trade_time = 0
-
-
-# ============================================================
-# LOAD PRODUCTS
-# ============================================================
-
-with st.spinner("Delta की पूरी product list लोड हो रही है..."):
-
-    products = get_all_products()
-
-
-if not products:
-
-    st.error(
-        "❌ Delta से tradable perpetual products नहीं मिले."
-    )
-
-    st.stop()
-
-
-# ============================================================
-# SYMBOL SELECT
-# ARCUSD DEFAULT
-# ============================================================
-
-symbols = [
-    p["symbol"]
-    for p in products
-]
-
-if DEFAULT_SYMBOL in symbols:
-
-    default_index = symbols.index(
-        DEFAULT_SYMBOL
-    )
-
-else:
-
-    default_index = 0
-
-
-selected_symbol = st.selectbox(
-    "🪙 Crypto",
-    symbols,
-    index=default_index
-)
-
-
-product = find_product(
-    selected_symbol,
-    products
-)
-
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-
-st.sidebar.header("⚙️ Scalper Settings")
-
-order_size = st.sidebar.number_input(
-    "Order Size",
-    min_value=1,
-    value=DEFAULT_ORDER_SIZE,
-    step=1
-)
-
-st.sidebar.write(
-    f"SL: {SL_PERCENT * 100:.2f}%"
-)
-
-st.sidebar.write(
-    f"TP: {TP_PERCENT * 100:.2f}%"
-)
-
-st.sidebar.write(
-    f"Cooldown: {COOLDOWN_SECONDS} sec"
-)
-
-st.sidebar.warning(
-    "⚠️ LIVE TRADING ENABLED"
-)
-
-
-# ============================================================
-# PRODUCT INFO
-# ============================================================
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric(
-    "Symbol",
-    selected_symbol
-)
-
-col2.metric(
-    "Product ID",
-    product["id"]
-)
-
-col3.metric(
-    "Products",
-    len(products)
-)
-
-
-# ============================================================
-# API STATUS
-# ============================================================
-
-st.subheader("🔐 Delta API")
-
-if DELTA_API_KEY and DELTA_API_SECRET:
-
-    st.success(
-        "DELTA_API_KEY और DELTA_API_SECRET मिले."
-    )
-
-else:
-
-    st.error(
-        "❌ Render Environment Variables missing."
-    )
-
-    st.stop()
-
-
-# ============================================================
-# AUTH TEST
-# ============================================================
-
-if st.button("🔐 Test Delta Authentication"):
-
-    with st.spinner("Delta authentication test..."):
-
-        status, result = test_delta_auth(
-            product["id"]
-        )
-
-    if status == 200:
-
-        st.success(
-            "✅ Delta API Authentication सफल है."
-        )
-
-        st.json(result)
-
-    else:
-
-        st.error(
-            f"❌ Delta Authentication Failed — HTTP {status}"
-        )
-
-        st.code(
-            json.dumps(
-                result,
-                indent=2,
-                ensure_ascii=False
-            )
-        )
-
-        st.stop()
-
-
-# ============================================================
-# FETCH DATA
-# ============================================================
-
-st.subheader(
-    f"📊 {selected_symbol} — 1 Minute Real Market Data"
-)
-
-df, candle_error = get_candles(
-    selected_symbol
-)
-
-if df is None:
-
-    st.error(
-        f"❌ Candle error: {candle_error}"
-    )
-
-    st.stop()
-
-
-st.dataframe(
-    df,
-    use_container_width=True
-)
-
-
-# ============================================================
-# LIVE PRICE
-# ============================================================
-
-live_price, ticker_error = get_ticker(
-    selected_symbol
-)
-
-if live_price:
-
-    st.metric(
-        "Live Price",
-        live_price
-    )
-
-
-# ============================================================
-# AI ANALYSIS
-# ============================================================
-
-st.subheader("🤖 Groq Scalping AI")
-
-if st.button(
-    "⚡ ANALYZE + REAL TRADE"
-):
-
+    # Cooldown
     now = time.time()
 
-    # cooldown
     if (
-        now
-        - st.session_state.last_trade_time
+        now - st.session_state.last_trade_time
         < COOLDOWN_SECONDS
     ):
 
@@ -1034,80 +651,458 @@ if st.button(
             )
         )
 
-        st.warning(
-            f"⏳ Cooldown active: "
-            f"{remaining} seconds"
+        log(
+            f"COOLDOWN active: {remaining}s"
         )
 
-        st.stop()
+        return {
+            "status": "cooldown"
+        }
 
-    with st.spinner(
-        f"{selected_symbol} का 1m scalp analysis..."
-    ):
+    side = (
+        "buy"
+        if signal == "BUY"
+        else "sell"
+    )
 
-        signal, ai_error = run_ai(
-            df,
-            selected_symbol
+    log(
+        f"🚀 REAL ORDER: {signal} | "
+        f"{symbol} | SIZE={LOT_SIZE}"
+    )
+
+    # Market order
+    order = place_market_order(
+        symbol,
+        side
+    )
+
+    st.session_state.last_trade_time = time.time()
+    st.session_state.last_order = order
+
+    log(
+        f"MARKET ORDER SUCCESS: {order}"
+    )
+
+    # Give exchange a moment
+    time.sleep(1)
+
+    # Get ticker after order
+    ticker = get_ticker(symbol)
+
+    entry_price = (
+        ticker.get("mark_price")
+        or ticker.get("close")
+        or ticker.get("last_price")
+    )
+
+    if entry_price:
+
+        try:
+
+            bracket = place_bracket(
+                symbol,
+                side,
+                float(entry_price)
+            )
+
+            log(
+                f"🛡 SL/TP BRACKET SUCCESS: "
+                f"{bracket}"
+            )
+
+        except Exception as e:
+
+            log(
+                f"⚠ MARKET ORDER FILLED BUT "
+                f"BRACKET ERROR: {e}"
+            )
+
+    else:
+
+        log(
+            "⚠ Entry price unavailable; "
+            "bracket was not created."
         )
 
-    if ai_error:
+    return {
+        "status": "executed",
+        "order": order
+    }
 
-        st.error(
-            f"❌ AI Error: {ai_error}"
+
+# ============================================================
+# API TEST
+# ============================================================
+
+def test_api():
+
+    data = delta_request(
+        "GET",
+        "/v2/orders",
+        params={
+            "page_size": 1
+        },
+        auth=True
+    )
+
+    return data
+
+
+# ============================================================
+# AUTO SCAN
+# ============================================================
+
+def run_one_scan(symbol):
+
+    log(
+        f"🔎 Scanning {symbol}..."
+    )
+
+    # Product
+    product = get_product(symbol)
+
+    log(
+        f"PRODUCT OK: {symbol} "
+        f"(ID={product.get('id')})"
+    )
+
+    # Candles
+    df = get_candles(symbol)
+
+    if df.empty:
+
+        log(
+            "No candle data."
         )
 
-        st.stop()
+        return
 
-    st.info(
-        f"🤖 AI SIGNAL: **{signal}**"
+    last_close = df.iloc[-1]["close"]
+
+    log(
+        f"PRICE: {last_close}"
+    )
+
+    # AI
+    signal = get_ai_signal(df)
+
+    st.session_state.last_signal = signal
+
+    log(
+        f"🤖 AI SIGNAL: {signal}"
     )
 
     if signal == "NO_TRADE":
 
-        st.warning(
-            "⏳ AI ने NO_TRADE दिया."
+        log(
+            "No trade."
         )
 
-        st.stop()
+        return
 
-    # ----------------------------------------
-    # REAL TRADE
-    # ----------------------------------------
+    # Execute
+    result = execute_trade(
+        symbol,
+        signal
+    )
 
-    with st.spinner(
-        "🚨 REAL DELTA ORDER भेजा जा रहा है..."
+    log(
+        f"EXECUTION RESULT: {result.get('status')}"
+    )
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+
+st.sidebar.header("⚙ SETTINGS")
+
+symbol = st.sidebar.text_input(
+    "Symbol",
+    value=DEFAULT_SYMBOL
+).upper().strip()
+
+st.sidebar.write(
+    f"**Timeframe:** {TIMEFRAME}"
+)
+
+st.sidebar.write(
+    f"**Lot Size:** {LOT_SIZE}"
+)
+
+st.sidebar.write(
+    f"**SL:** {SL_PERCENT * 100:.2f}%"
+)
+
+st.sidebar.write(
+    f"**TP:** {TP_PERCENT * 100:.2f}%"
+)
+
+st.sidebar.write(
+    f"**Scan:** {SCAN_SECONDS}s"
+)
+
+st.sidebar.write(
+    f"**Cooldown:** {COOLDOWN_SECONDS}s"
+)
+
+
+# ============================================================
+# STATUS
+# ============================================================
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+
+    if DELTA_API_KEY and DELTA_API_SECRET:
+        st.success("Delta API: READY")
+    else:
+        st.error("Delta API: MISSING")
+
+
+with col2:
+
+    if GROQ_API_KEY:
+        st.success("Groq AI: READY")
+    else:
+        st.error("Groq AI: MISSING")
+
+
+with col3:
+
+    st.metric(
+        "Last Signal",
+        st.session_state.last_signal
+    )
+
+
+with col4:
+
+    st.metric(
+        "Lot Size",
+        LOT_SIZE
+    )
+
+
+# ============================================================
+# BUTTONS
+# ============================================================
+
+st.subheader("🎮 Control")
+
+c1, c2, c3 = st.columns(3)
+
+with c1:
+
+    test_button = st.button(
+        "🔐 Test Delta API",
+        use_container_width=True
+    )
+
+with c2:
+
+    scan_button = st.button(
+        "⚡ Scan + Trade Now",
+        use_container_width=True
+    )
+
+with c3:
+
+    if st.button(
+        "🛑 STOP AUTO",
+        use_container_width=True
     ):
 
-        success, message = execute_trade(
-            product,
-            signal,
-            order_size
+        st.session_state.running = False
+
+        log(
+            "🛑 AUTO SCALPER STOPPED"
         )
 
-    if success:
+
+# ============================================================
+# TEST API
+# ============================================================
+
+if test_button:
+
+    try:
+
+        result = test_api()
 
         st.success(
-            message
+            "✅ Delta authenticated API working"
         )
 
-        st.session_state.last_trade_time = (
-            time.time()
+        st.json(result)
+
+        log(
+            "Delta API authentication SUCCESS"
         )
 
-    else:
+    except Exception as e:
 
         st.error(
-            message
+            f"❌ Delta API ERROR: {e}"
+        )
+
+        log(
+            f"Delta API ERROR: {e}"
         )
 
 
 # ============================================================
-# REFRESH
+# MANUAL SCAN
 # ============================================================
 
-st.divider()
+if scan_button:
 
-if st.button("🔄 Refresh Market Data"):
+    try:
 
-    st.cache_data.clear()
-    st.rerun()
+        run_one_scan(symbol)
+
+        st.success(
+            "Scan completed."
+        )
+
+    except Exception as e:
+
+        st.error(
+            f"Scan error: {e}"
+        )
+
+        log(
+            f"SCAN ERROR: {e}"
+        )
+
+
+# ============================================================
+# AUTO START
+# ============================================================
+
+st.subheader("🤖 Automatic Scalping")
+
+auto_start = st.checkbox(
+    "START AUTOMATIC SCALPING",
+    value=st.session_state.running
+)
+
+if auto_start:
+
+    st.session_state.running = True
+
+else:
+
+    st.session_state.running = False
+
+
+if st.session_state.running:
+
+    st.warning(
+        "⚠ AUTO MODE ACTIVE — REAL ORDERS CAN BE PLACED"
+    )
+
+    placeholder = st.empty()
+
+    while st.session_state.running:
+
+        cycle_start = time.time()
+
+        try:
+
+            run_one_scan(symbol)
+
+        except Exception as e:
+
+            log(
+                f"AUTO ERROR: {e}"
+            )
+
+        # Show logs
+        with placeholder.container():
+
+            st.write(
+                f"### 🔄 AUTO SCANNER — {symbol}"
+            )
+
+            st.write(
+                f"Next scan in approximately "
+                f"{SCAN_SECONDS} seconds"
+            )
+
+            if st.session_state.logs:
+
+                st.code(
+                    "\n".join(
+                        st.session_state.logs[:30]
+                    )
+                )
+
+        elapsed = (
+            time.time()
+            - cycle_start
+        )
+
+        sleep_time = max(
+            1,
+            SCAN_SECONDS - elapsed
+        )
+
+        time.sleep(
+            sleep_time
+        )
+
+        st.rerun()
+
+
+# ============================================================
+# MARKET DATA
+# ============================================================
+
+st.subheader("📊 Live Market Data")
+
+try:
+
+    ticker = get_ticker(symbol)
+
+    t1, t2, t3, t4 = st.columns(4)
+
+    with t1:
+        st.metric(
+            "Symbol",
+            symbol
+        )
+
+    with t2:
+        st.metric(
+            "Last Price",
+            ticker.get(
+                "close",
+                "N/A"
+            )
+        )
+
+    with t3:
+        st.metric(
+            "Mark Price",
+            ticker.get(
+                "mark_price",
+                "N/A"
+            )
+        )
+
+    with t4:
+        st.metric(
+            "Volume",
+            ticker.get(
+                "volume",
+                "N/A"
+            )
+        )
+
+except Exception as e:
+
+    st.error(
+        f"Ticker error: {e}"
+   
