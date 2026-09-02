@@ -33,19 +33,14 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    /* Main Background & Font */
     .stApp {
         background-color: #0b0f19;
         color: #f3f4f6;
     }
-    
-    /* Header Styling */
     h1, h2, h3 {
         color: #ffffff;
         font-family: 'Inter', sans-serif;
     }
-
-    /* Metric Cards Styling */
     div.stMetric {
         background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
         border: 1px solid #374151;
@@ -61,8 +56,6 @@ st.markdown("""
         color: #10b981 !important;
         font-size: 1.8rem !important;
     }
-
-    /* Buttons Styling */
     .stButton > button {
         background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
         color: white;
@@ -79,8 +72,6 @@ st.markdown("""
         box-shadow: 0 6px 16px rgba(59, 130, 246, 0.5);
         transform: translateY(-1px);
     }
-
-    /* Tabs Styling */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
         background-color: #111827;
@@ -97,12 +88,6 @@ st.markdown("""
     .stTabs [aria-selected="true"] {
         background-color: #3b82f6 !important;
         color: white !important;
-    }
-
-    /* Input & Selectbox Styling */
-    .stSelectbox div[data-baseweb="select"], .stSlider {
-        background-color: #1f2937;
-        border-radius: 8px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -273,7 +258,8 @@ CANDLES:
 """
 
     client = Groq(api_key=GROQ_API_KEY)
-    models = ["llama-3.3-70b-versatile"]
+    # यहाँ वर्किंग मॉडल सेट किया गया है
+    models = ["llama-3.1-8b-instant"]
 
     for model in models:
         try:
@@ -336,7 +322,7 @@ def place_sl_tp_orders(symbol, entry_side, entry_price):
 
     results = []
 
-    # Stop Loss
+    # Stop Loss (Stop Order)
     sl_body = {
         "product_symbol": symbol,
         "size": LOT_SIZE,
@@ -353,7 +339,7 @@ def place_sl_tp_orders(symbol, entry_side, entry_price):
     except Exception as e:
         results.append(("Stop Loss Error", str(e)))
 
-    # Take Profit
+    # Take Profit (Limit Order)
     tp_body = {
         "product_symbol": symbol,
         "size": LOT_SIZE,
@@ -533,7 +519,7 @@ with tab2:
 """
                     client = Groq(api_key=GROQ_API_KEY)
                     res = client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
+                        model="llama-3.1-8b-instant",
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_query}
