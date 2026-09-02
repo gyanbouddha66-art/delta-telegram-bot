@@ -21,13 +21,6 @@ LOT_SIZE = 1
 SL_PERCENT = 0.005       # 0.5% Stop Loss
 TP_PERCENT = 0.010       # 1.0% Take Profit
 
-# ============================================================
-# GROQ MODEL
-# ============================================================
-# llama-3.1-8b-instant was deprecated by Groq.
-# Current replacement:
-GROQ_MODEL = "openai/gpt-oss-20b"
-
 
 # ============================================================
 # PAGE CONFIG
@@ -130,12 +123,14 @@ div.stMetric div[data-testid="stMetricValue"] {
 
 
 # ============================================================
-# API KEYS
+# API KEYS & MODEL CONFIG
 # ============================================================
 
 DELTA_API_KEY = os.getenv("DELTA_API_KEY", "")
 DELTA_API_SECRET = os.getenv("DELTA_API_SECRET", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+
+GROQ_MODEL = "openai/gpt-oss-20b"
 
 
 # ============================================================
@@ -361,7 +356,7 @@ def get_candles(symbol):
 
 
 # ============================================================
-# GROQ AI SIGNAL ENGINE
+# GROQ AI SIGNAL ENGINE (STRICT JSON SCHEMA)
 # ============================================================
 
 def get_signal_and_analysis(
@@ -369,23 +364,13 @@ def get_signal_and_analysis(
     symbol
 ):
 
-    # --------------------------------------------------------
-    # SAFETY: API KEY CHECK
-    # --------------------------------------------------------
-
     if not GROQ_API_KEY:
-
         return (
             "NO TRADE",
             "Groq API Key उपलब्ध नहीं है।"
         )
 
-    # --------------------------------------------------------
-    # SAFETY: DATA CHECK
-    # --------------------------------------------------------
-
     if len(candles) < 5:
-
         return (
             "NO TRADE",
             "पर्याप्त candle data उपलब्ध नहीं है।"
@@ -398,56 +383,14 @@ def get_signal_and_analysis(
         for c in recent
     )
 
-    # --------------------------------------------------------
-    # AI PROMPT
-    # --------------------------------------------------------
-
     prompt = f"""
 आप GYAN AI Pro के Institutional Trading Decision Engine हैं।
-
 Symbol: {symbol}
-
-आपको दिए गए 1-minute candles का विश्लेषण करना है।
-
-इन factors को देखें:
-
-1. Market Structure
-2. Higher High / Higher Low
-3. Lower High / Lower Low
-4. Momentum
-5. Candle Strength
-6. Buying Pressure
-7. Selling Pressure
-8. Breakout / Breakdown
-9. Possible Liquidity Sweep
-10. Order Flow Behaviour
-
-महत्वपूर्ण:
-
-- बिना स्पष्ट confirmation BUY या SELL न दें।
-- अगर market unclear है तो NO TRADE दें।
-- अनुमान लगाकर BUY न दें।
-- केवल दिए गए candle data पर निर्णय लें।
-
-सिर्फ इस JSON format में जवाब दें:
-
-{{
-    "signal": "BUY",
-    "analysis": "हिंदी में विस्तृत कारण"
-}}
-
-signal केवल:
-BUY
-SELL
-NO TRADE
+इन 1-minute candles का विश्लेषण करें और केवल निम्नलिखित structure में उत्तर दें।
 
 CANDLES:
 {candle_text}
 """
-
-    # --------------------------------------------------------
-    # GROQ CLIENT
-    # --------------------------------------------------------
 
     try:
 
@@ -461,10 +404,46 @@ CANDLES:
 
             messages=[
                 {
+                    "role": "system",
+                    "content": (
+                        "आप GYAN AI Pro trading analysis engine हैं। "
+                        "केवल requested structured JSON output दें।"
+                    )
+                },
+                {
                     "role": "user",
                     "content": prompt
                 }
             ],
+
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "trading_signal",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "signal": {
+                                "type": "string",
+                                "enum": [
+                                    "BUY",
+                                    "SELL",
+                                    "NO TRADE"
+                                ]
+                            },
+                            "analysis": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "signal",
+                            "analysis"
+                        ],
+                        "additionalProperties": False
+                    }
+                }
+            },
 
             temperature=0.2,
 
@@ -476,40 +455,15 @@ CANDLES:
             .choices[0]
             .message
             .content
-            .strip()
         )
 
-        # ----------------------------------------------------
-        # REMOVE MARKDOWN JSON
-        # ----------------------------------------------------
+        if not content:
+            return (
+                "NO TRADE",
+                "AI ने कोई valid response नहीं दिया।"
+            )
 
-        if content.startswith(
-            "```json"
-        ):
-
-            content = content[7:]
-
-        elif content.startswith(
-            "```"
-        ):
-
-            content = content[3:]
-
-        if content.endswith(
-            "```"
-        ):
-
-            content = content[:-3]
-
-        content = content.strip()
-
-        # ----------------------------------------------------
-        # JSON PARSE
-        # ----------------------------------------------------
-
-        data = json.loads(
-            content
-        )
+        data = json.loads(content)
 
         signal = str(
             data.get(
@@ -523,30 +477,30 @@ CANDLES:
                 "analysis",
                 "AI analysis उपलब्ध नहीं है।"
             )
-        )
+        ).strip()
 
-        # ----------------------------------------------------
-        # VALID SIGNAL
-        # ----------------------------------------------------
-
-        if signal in [
+        if signal not in [
             "BUY",
             "SELL",
             "NO TRADE"
         ]:
-
             return (
-                signal,
-                analysis
+                "NO TRADE",
+                "AI ने invalid signal दिया।"
             )
 
         return (
+            signal,
+            analysis
+        )
+
+    except json.JSONDecodeError as e:
+        return (
             "NO TRADE",
-            "AI ने valid trading signal नहीं दिया।"
+            f"AI JSON Error: {str(e)}"
         )
 
     except Exception as e:
-
         return (
             "NO TRADE",
             f"AI Analysis Error: {str(e)}"
@@ -613,15 +567,10 @@ def place_market_order(
 ):
 
     body = {
-
         "product_symbol": symbol,
-
         "size": LOT_SIZE,
-
         "side": side,
-
         "order_type": "market_order",
-
         "time_in_force": "ioc"
     }
 
@@ -682,99 +631,50 @@ def place_sl_tp_orders(
 
     results = []
 
-    # ========================================================
-    # STOP LOSS
-    # ========================================================
-
+    # Stop Loss
     sl_body = {
-
         "product_symbol": symbol,
-
         "size": LOT_SIZE,
-
         "side": exit_side,
-
         "order_type": "stop_order",
-
         "stop_price": f"{stop_price:.4f}",
-
         "limit_price": f"{stop_price:.4f}",
-
         "reduce_only": True,
-
         "time_in_force": "gtc"
     }
 
     try:
-
         sl_res = delta_request(
             "POST",
             "/v2/orders",
             body=sl_body,
             auth=True
         )
-
-        results.append(
-            (
-                "Stop Loss",
-                sl_res
-            )
-        )
-
+        results.append(("Stop Loss", sl_res))
     except Exception as e:
+        results.append(("Stop Loss Error", str(e)))
 
-        results.append(
-            (
-                "Stop Loss Error",
-                str(e)
-            )
-        )
-
-    # ========================================================
-    # TAKE PROFIT
-    # ========================================================
-
+    # Take Profit
     tp_body = {
-
         "product_symbol": symbol,
-
         "size": LOT_SIZE,
-
         "side": exit_side,
-
         "order_type": "limit_order",
-
         "limit_price": f"{target_price:.4f}",
-
         "reduce_only": True,
-
         "time_in_force": "gtc"
     }
 
     try:
-
         tp_res = delta_request(
             "POST",
             "/v2/orders",
             body=tp_body,
             auth=True
         )
-
-        results.append(
-            (
-                "Take Profit",
-                tp_res
-            )
-        )
-
+        results.append(("Take Profit", tp_res))
     except Exception as e:
-
-        results.append(
-            (
-                "Take Profit Error",
-                str(e)
-            )
-        )
+        results.append(("Take Profit Error", str(e)))
 
     return results
 
@@ -801,12 +701,21 @@ st.divider()
 symbols_list = get_all_symbols()
 
 if not symbols_list:
-
     symbols_list = [
         "ARCUSD",
         "BTCUSD",
         "ETHUSD"
     ]
+
+
+# ============================================================
+# SESSION STATE INITIALIZATION (For Cooldown & Tracking)
+# ============================================================
+
+if "last_trade_time" not in st.session_state:
+    st.session_state.last_trade_time = 0
+
+COOLDOWN_SECONDS = 60
 
 
 # ============================================================
@@ -830,7 +739,6 @@ with tab1:
     c1, c2, c3 = st.columns(3)
 
     with c1:
-
         selected_symbol = st.selectbox(
             "🪙 क्रिप्टो सिंबल चुनें",
             symbols_list,
@@ -838,14 +746,12 @@ with tab1:
         )
 
     with c2:
-
         auto_trade = st.checkbox(
             "🔄 ऑटो-स्केल्पिंग लूप मोड",
             value=False
         )
 
     with c3:
-
         refresh_rate = st.slider(
             "⏱️ रिफ्रेश इंटरवल (सेकंड)",
             5,
@@ -858,12 +764,7 @@ with tab1:
         unsafe_allow_html=True
     )
 
-    # ========================================================
-    # LIVE PRICE
-    # ========================================================
-
     try:
-
         live_ticker = get_ticker(
             selected_symbol
         )
@@ -904,7 +805,6 @@ with tab1:
         )
 
     except Exception as e:
-
         st.warning(
             f"Ticker Error: {str(e)}"
         )
@@ -914,24 +814,14 @@ with tab1:
     placeholder = st.empty()
 
 
-    # ========================================================
-    # SCALPING ENGINE
-    # ========================================================
-
     def run_scalping():
 
         with placeholder.container():
 
             try:
-
-                # ------------------------------------------------
-                # MARKET DATA
-                # ------------------------------------------------
-
                 with st.spinner(
                     f"🔍 {selected_symbol} का मार्केट स्कैन हो रहा है..."
                 ):
-
                     ticker = get_ticker(
                         selected_symbol
                     )
@@ -950,71 +840,52 @@ with tab1:
                         or 0
                     )
 
-                # ------------------------------------------------
-                # CHECK POSITION
-                # ------------------------------------------------
-
                 pos_size = get_position(
                     product_id
                 )
 
                 if pos_size != 0:
-
                     st.warning(
                         f"⚠️ **पोजीशन पहले से खुली है** "
                         f"(साइज: `{pos_size}`)। "
-                        f"नई एंट्री होल्ड पर है।"
+                        f"डुपलिकेट ट्रेड से बचाव सक्रिय है।"
                     )
-
                     return
 
-                # ------------------------------------------------
-                # GET CANDLES
-                # ------------------------------------------------
+                current_time = time.time()
+                time_elapsed = current_time - st.session_state.last_trade_time
+
+                if time_elapsed < COOLDOWN_SECONDS:
+                    remaining = int(COOLDOWN_SECONDS - time_elapsed)
+                    st.info(
+                        f"⏳ **कूलडाउन मोड सक्रिय है:** "
+                        f"अगला ट्रेड लेने से पहले `{remaining} सेकंड` बाकी हैं।"
+                    )
+                    return
 
                 candles = get_candles(
                     selected_symbol
                 )
 
-                # ------------------------------------------------
-                # AI ANALYSIS
-                # ------------------------------------------------
-
-                signal, analysis = (
-                    get_signal_and_analysis(
-                        candles,
-                        selected_symbol
-                    )
+                signal, analysis = get_signal_and_analysis(
+                    candles,
+                    selected_symbol
                 )
 
-                # ------------------------------------------------
-                # NO TRADE SAFETY
-                # ------------------------------------------------
-
                 if signal == "NO TRADE":
-
                     st.warning(
-                        "⏸️ **NO TRADE**"
+                        "⏸️ **NO TRADE (बाजार स्पष्ट नहीं है)**"
                     )
-
                     st.info(
                         f"💡 {analysis}"
                     )
-
                     return
 
-                # ------------------------------------------------
-                # SIGNAL
-                # ------------------------------------------------
-
                 if signal == "BUY":
-
                     st.success(
                         "🤖 **AI SIGNAL: BUY**"
                     )
-
                 elif signal == "SELL":
-
                     st.error(
                         "🤖 **AI SIGNAL: SELL**"
                     )
@@ -1022,10 +893,6 @@ with tab1:
                 st.info(
                     f"💡 **AI ट्रेड एनालिसिस:**\n\n{analysis}"
                 )
-
-                # ------------------------------------------------
-                # SIDE
-                # ------------------------------------------------
 
                 side = (
                     "buy"
@@ -1037,10 +904,6 @@ with tab1:
                     f"🚀 **MARKET {side.upper()} "
                     f"ORDER भेजा जा रहा है...**"
                 )
-
-                # ------------------------------------------------
-                # MARKET ORDER
-                # ------------------------------------------------
 
                 order_res = place_market_order(
                     selected_symbol,
@@ -1054,21 +917,10 @@ with tab1:
                     or mark_price
                 )
 
-                # ------------------------------------------------
-                # ORDER DETAILS
-                # ------------------------------------------------
-
                 with st.expander(
                     "📦 देखें ऑर्डर डिटेल्स"
                 ):
-
-                    st.json(
-                        order_res
-                    )
-
-                # ------------------------------------------------
-                # TP / SL
-                # ------------------------------------------------
+                    st.json(order_res)
 
                 st.markdown(
                     "🎯 **ऑटो TP & SL आर्डर सेट किए जा रहे हैं...**"
@@ -1080,23 +932,16 @@ with tab1:
                     fill_price
                 )
 
-                # ------------------------------------------------
-                # SHOW TP SL
-                # ------------------------------------------------
-
                 with st.expander(
                     "🛡️ देखें TP/SL डिटेल्स"
                 ):
-
                     for label, res in sl_tp_res:
-
                         st.write(
                             f"🔹 **{label}:**"
                         )
+                        st.json(res)
 
-                        st.json(
-                            res
-                        )
+                st.session_state.last_trade_time = time.time()
 
                 st.success(
                     "✅ **ट्रेड सफलतापूर्वक "
@@ -1104,45 +949,26 @@ with tab1:
                 )
 
             except Exception as e:
-
                 st.error(
                     f"❌ **एक्जीक्यूशन एरर:** "
                     f"{str(e)}"
                 )
 
 
-    # ========================================================
-    # MANUAL MODE
-    # ========================================================
-
     if not auto_trade:
-
         if st.button(
             "⚡ तुरंत एक ट्रेड निष्पादित करें "
             "(One-Click Execute)"
         ):
-
             run_scalping()
-
-
-    # ========================================================
-    # AUTO MODE
-    # ========================================================
-
     else:
-
         st.warning(
-            "🔄 AUTO SCALPING MODE ACTIVE"
+            "🔄 AUTO SCALPING MODE ACTIVE (डुपलिकेट और कूलडाउन रक्षित)"
         )
 
         while True:
-
             run_scalping()
-
-            time.sleep(
-                refresh_rate
-            )
-
+            time.sleep(refresh_rate)
             st.rerun()
 
 
@@ -1156,47 +982,22 @@ with tab2:
         "### 💬 GYAN AI Pro ट्रेडिंग मेंटर से सीधी बातचीत"
     )
 
-    st.markdown(
-        "यहाँ आप Universal Trading Institute के "
-        "AI मेंटर से किसी भी कॉइन या अपनी ट्रेडिंग "
-        "स्ट्रेटजी के बारे में हिंदी में चर्चा कर सकते हैं।"
-    )
-
-    # --------------------------------------------------------
-    # CHAT SYMBOL
-    # --------------------------------------------------------
-
     chat_symbol = st.selectbox(
         "चैट के लिए सिंबल चुनें",
         symbols_list,
         key="t2_sym"
     )
 
-    # --------------------------------------------------------
-    # SESSION
-    # --------------------------------------------------------
-
     if "messages" not in st.session_state:
-
         st.session_state.messages = []
 
-    # --------------------------------------------------------
-    # SHOW HISTORY
-    # --------------------------------------------------------
-
     for message in st.session_state.messages:
-
         with st.chat_message(
             message["role"]
         ):
-
             st.markdown(
                 message["content"]
             )
-
-    # --------------------------------------------------------
-    # USER CHAT
-    # --------------------------------------------------------
 
     if user_query := st.chat_input(
         "जैसे पूछें: 'इस कॉइन में फास्ट ट्रेड दो' "
@@ -1213,7 +1014,6 @@ with tab2:
         with st.chat_message(
             "user"
         ):
-
             st.markdown(
                 user_query
             )
@@ -1221,17 +1021,11 @@ with tab2:
         with st.chat_message(
             "assistant"
         ):
-
             with st.spinner(
                 "GYAN AI मेंटर जवाब तैयार कर रहा है..."
             ):
 
                 try:
-
-                    # ------------------------------------------------
-                    # TICKER
-                    # ------------------------------------------------
-
                     ticker = get_ticker(
                         chat_symbol
                     )
@@ -1241,73 +1035,11 @@ with tab2:
                         "N/A"
                     )
 
-                    # ------------------------------------------------
-                    # SYSTEM PROMPT
-                    # ------------------------------------------------
-
                     system_prompt = f"""
-आप GYAN AI Pro के बहुत स्मार्ट,
-फास्ट और प्रोफेशनल ट्रेडिंग मेंटर हैं।
-
-आप हमेशा आसान और स्पष्ट हिंदी में जवाब देते हैं।
-
-वर्तमान कॉइन:
-{chat_symbol}
-
-वर्तमान प्राइस:
-{price}
-
-आपका काम:
-
-- Market Structure समझना
-- Momentum समझना
-- Price Action समझना
-- Scalping setups बताना
-- Intraday setups बताना
-- Risk Management समझाना
-- Entry, SL और TP बताना
-- Market unclear हो तो NO TRADE कहना
-
-महत्वपूर्ण नियम:
-
-1. बिना confirmation के trade recommend न करें।
-2. Guaranteed profit का दावा न करें।
-3. Market unclear हो तो NO TRADE कहें।
-4. Risk management को प्राथमिकता दें।
-5. केवल वर्तमान price को देखकर blind BUY/SELL न दें।
-
-हर trading setup में यह format रखें:
-
-**1. स्ट्रेटजी का नाम**
-
-**2. मार्केट स्थिति**
-
-**3. स्ट्रेटजी का लॉजिक**
-
-**4. ट्रेड सेटअप**
-
-- Direction:
-- Entry Zone:
-- Stop Loss:
-- Take Profit 1:
-- Take Profit 2:
-- Risk-Reward Ratio:
-
-**5. ट्रेडिंग प्लान**
-
-- Capital allocation:
-- Exit condition:
-- Invalidation:
-
-**6. अतिरिक्त सलाह**
-
-जवाब प्रोफेशनल,
-स्पष्ट और practical रखें।
+आप GYAN AI Pro के बहुत स्मार्ट और प्रोफेशनल ट्रेडिंग मेंटर हैं।
+वर्तमान कॉइन: {chat_symbol}, प्राइस: {price}
+हर जवाब स्पष्ट और आसान हिंदी में दें।
 """
-
-                    # ------------------------------------------------
-                    # GROQ
-                    # ------------------------------------------------
 
                     client = Groq(
                         api_key=GROQ_API_KEY
@@ -1340,9 +1072,7 @@ with tab2:
                         .content
                     )
 
-                    st.markdown(
-                        reply
-                    )
+                    st.markdown(reply)
 
                     st.session_state.messages.append(
                         {
@@ -1352,16 +1082,11 @@ with tab2:
                     )
 
                 except Exception as e:
-
                     err_msg = (
                         "क्षमा करें, चैट में एरर आ गया: "
                         f"{str(e)}"
                     )
-
-                    st.error(
-                        err_msg
-                    )
-
+                    st.error(err_msg)
                     st.session_state.messages.append(
                         {
                             "role": "assistant",
