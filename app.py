@@ -82,13 +82,30 @@ def run_scalp_ai(market_data, symbol):
     Give an immediate scalp decision in one exact word:
     - BUY or SELL (No WAIT, give a clear direction based on momentum).
     """
-    response = client.chat.completions.create(
-        messages=[{"role": "user", "content": prompt}],
-        model="llama-3.1-8b-instant",  # अपडेटेड मॉडल नाम
-    )
-    return response.choices[0].message.content.strip()
+    
+    # एकाधिक मॉडल्स की लिस्ट ताकि जो चालू हो, उससे रिस्पॉन्स आ जाए
+    models_to_try = [
+        "llama-3.1-8b-instant",
+        "llama-3.3-70b-versatile",
+        "llama3-70b-8192"
+    ]
+    
+    for model_name in models_to_try:
+        try:
+            response = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model=model_name,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            continue
+            
+    return "AI Error: All models failed or unavailable."
 
 def execute_delta_scalp(signal, target_symbol):
+    if "AI Error" in signal or "Error" in signal:
+        return f"❌ Trade cancelled due to AI issue: {signal}"
+        
     api_key = os.environ.get('DELTA_API_KEY')
     api_secret = os.environ.get('DELTA_API_SECRET')
     
@@ -131,7 +148,7 @@ def execute_delta_scalp(signal, target_symbol):
             return f"✅ Scalp SELL Executed on {trade_sym} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
             
         else:
-            return "⏳ Signal unclear. No trade placed."
+            return f"⏳ Signal unclear ({signal}). No trade placed."
             
     except Exception as e:
         return f"❌ Trade Execution Error: {str(e)}"
