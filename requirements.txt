@@ -1,7 +1,7 @@
-Flask
-gunicorn
-requests
-ccxt
 streamlit
-edge-tts
-python-telegram-bot
+yfinance
+groq
+ccxt
+requests
+flask
+gunicorn
