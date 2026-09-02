@@ -5,11 +5,12 @@ import requests
 import pandas as pd
 import ccxt
 
-st.title("⚡ One-Click AI Crypto Scalper (All Coins + Live Data Fix + Auto SL/TP)")
+st.title("⚡ One-Click AI Crypto Scalper (All Coins + Direct API Fix)")
 
 @st.cache_data(ttl=60)
 def get_all_delta_symbols():
     try:
+        # सीधे डेल्टा एक्सचेंज की एपीआई से सारे कॉइन्स (ARCUSD सहित) लोड करना
         prod_url = "https://api.delta.exchange/v2/products"
         response = requests.get(prod_url).json()
         products = response.get("result", [])
@@ -21,40 +22,38 @@ def get_all_delta_symbols():
         for p in products:
             sym = str(p.get("symbol", "")).strip().upper()
             p_id = p.get("id")
-            # डेल्टा के सभी ट्रेडिंग सिम्बल्स (ARCUSD, BTC, ETH आदि) को शामिल करें
+            # विकल्प (C-/P-) को छोड़कर सभी परपेचुअल, स्पॉट और फ्यूचर्स कॉइन्स को शामिल करें
             if sym and p_id and not sym.startswith("C-") and not sym.startswith("P-"):
                 symbols.append(sym)
                 product_map[sym] = p_id
                 
-        return sorted(list(set(symbols))), product_map
+        # अगर एपीआई से लिस्ट मिल जाए तो ठीक, वरना CCXT का सहारा लें
+        if symbols:
+            return sorted(list(set(symbols))), product_map
+            
     except Exception as e:
-        return ["ARCUSD", "BTCUSD", "ETH_USDT"], {}
+        pass
+        
+    # फॉलबैक के लिए CCXT मार्केट्स
+    try:
+        exchange = ccxt.delta({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+        exchange.load_markets()
+        ccxt_symbols = sorted(list(exchange.symbols))
+        return ccxt_symbols, {}
+    except Exception as e:
+        return ["ARCUSD", "BTCUSD", "ETHUSD"], {}
 
-# डेल्टा के सभी कॉइन लोड करना
 all_symbols, product_map = get_all_delta_symbols()
 
+# अब इसमें ARCUSD और डेल्टा के सारे कॉइन मिलेंगे
 selected_coin = st.selectbox(
     "🪙 डेल्टा एक्सचेंज के सभी कॉइन (ARCUSD सहित) में से चुनें:",
-    all_symbols if all_symbols else ["ARCUSD", "BTCUSD", "ETH_USDT"]
+    all_symbols if all_symbols else ["ARCUSD", "BTCUSD", "ETHUSD"]
 )
 
 def fetch_delta_market_data(target_symbol, p_map):
     try:
-        product_id = p_map.get(target_symbol)
-        
-        # 1. पहले डेल्टा REST API से कैंडल फेच करें
-        if product_id:
-            candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=15"
-            candle_res = requests.get(candles_url).json()
-            raw_candles = candle_res.get("result", [])
-            if raw_candles:
-                df = pd.DataFrame(raw_candles, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-                df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
-                # यदि डेटा फ्लैट (समान) है तो सीसीXT का उपयोग करें
-                if df['Close'].nunique() > 1:
-                    return df, target_symbol
-
-        # 2. CCXT के ज़रिए लाइव ओएचएलसीवी (OHLCV) डेटा फेच करें
+        # सबसे पहले डायरेक्ट CCXT से असली लाइव ओएचएलसीवी (OHLCV) डेटा लें ताकि एक जैसा प्राइस न आए
         exchange = ccxt.delta({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
         exchange.load_markets()
         
@@ -170,8 +169,8 @@ if st.button("⚡ Run Instant Scalp & Risk Manager"):
             st.info(f"🤖 Groq AI Decision: **{signal}**")
             
             result_msg = execute_delta_scalp(signal, active_symbol)
-            if "invalid_api_key" in result_msg:
-                st.error("🚨 आपकी Delta API Key गलत है! कृपया Render Dashboard में जाकर सही Delta API Key और Secret डालें।")
+            if "invalid_api_key" in result_msg or "Authentication" in result_msg:
+                st.error("🚨 आपकी Delta API Key या उसकी Trading Permissions गलत हैं! कृपया डेल्टा पर की चेक करें।")
             else:
                 st.success(result_msg)
         else:
