@@ -1,1 +1,26 @@
 
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+      runs-on: ubuntu-latest
+      steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Build WebView Wrapper App
+        run: |
+          echo "Building GYAN AI Pro APK..."
+          mkdir -p app/src/main/java/com/gyanai/pro
+          echo "package com.gyanai.pro; import android.app.Activity; import android.os.Bundle; import android.webkit.WebView; public class MainActivity extends Activity { WebView wv; @Override protected void onCreate(Bundle savedInstanceState) { super.onCreate(savedInstanceState); wv = new WebView(this); wv.getSettings().setJavaScriptEnabled(true); wv.getSettings().setDomStorageEnabled(true); wv.loadUrl('https://delta-telegram-bot-agg7.onrender.com'); setContentView(wv); }}" > app/src/main/java/com/gyanai/pro/MainActivity.java
+          echo "App workflow configured successfully."
