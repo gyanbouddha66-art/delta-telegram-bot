@@ -10,10 +10,13 @@ timeframe = "1m"     # 1 मिनट का स्कैल्पिंग फ�
 
 def fetch_ccxt_market_data():
     try:
-        exchange = ccxt.delta({'enableRateLimit': True})
+        # डेरिवेटिव्स/परपेचुअल मार्केट्स के लिए defaultType 'swap' सेट किया गया है
+        exchange = ccxt.delta({
+            'enableRateLimit': True,
+            'options': {'defaultType': 'swap'}
+        })
         exchange.load_markets()
         
-        # डेल्टा एक्सचेंज पर सही सिंबल खोजना
         possible_symbols = ['ARCUSD', 'ARC/USD:USD', 'ARC/USD', 'ARC/USDT']
         target_symbol = None
         
@@ -68,7 +71,8 @@ def execute_delta_scalp_with_risk(signal, target_symbol):
     exchange = ccxt.delta({
         'apiKey': api_key, 
         'secret': api_secret, 
-        'enableRateLimit': True
+        'enableRateLimit': True,
+        'options': {'defaultType': 'swap'}
     })
     
     try:
