@@ -5,63 +5,77 @@ import requests
 import pandas as pd
 import ccxt
 
-st.title("⚡ ArcUSD Pro Scalper (Direct API + Auto SL/TP)")
+st.title("⚡ One-Click AI Crypto Scalper (Direct API + Auto SL/TP)")
 
-timeframe = "1m"
-TARGET_SYMBOL = "ARCUSD"
-
-def fetch_delta_market_data():
+@st.cache_data(ttl=60)
+def get_all_delta_symbols():
     try:
-        # डेल्टा एक्सचेंज के प्रोडक्ट्स की लिस्ट मंगाना
         prod_url = "https://api.delta.exchange/v2/products"
         response = requests.get(prod_url).json()
-        
         products = response.get("result", [])
         if not products and isinstance(response, list):
             products = response
             
-        product_id = None
-        contract_symbol = TARGET_SYMBOL
-        
-        # सटीक ARCUSD या मिलता-जुलता प्रोडक्ट खोजना
+        symbols = []
+        product_map = {}
         for p in products:
             sym = str(p.get("symbol", "")).strip().upper()
-            if sym == TARGET_SYMBOL or sym == "ARC/USD" or "ARC" in sym:
-                product_id = p.get("id")
-                contract_symbol = p.get("symbol", TARGET_SYMBOL)
-                break
+            if sym and not sym.startswith("C-") and not sym.startswith("P-"):
+                symbols.append(sym)
+                product_map[sym] = p.get("id")
                 
-        if not product_id and products:
-            # अगर नाम से न मिले तो सूची का पहला प्रोडक्ट ले लेंगे ताकि ऐप रुके नहीं
-            product_id = products[0].get("id")
-            contract_symbol = products[0].get("symbol", "DEFAULT")
-            
+        return sorted(list(set(symbols))), product_map
+    except Exception as e:
+        return ["ARCUSD", "BTCUSD", "ETHUSD"], {}
+
+# डेल्टा के सारे कॉइन की लिस्ट लोड करना
+all_symbols, product_map = get_all_delta_symbols()
+
+# 1. यूजर सिर्फ कॉइन सिलेक्ट करेगा
+selected_coin = st.selectbox(
+    "🪙 ट्रेड करने के लिए कॉइन चुनें:",
+    all_symbols if all_symbols else ["ARCUSD", "BTCUSD"]
+)
+
+def fetch_delta_market_data(target_symbol, p_map):
+    try:
+        product_id = p_map.get(target_symbol)
         if not product_id:
-            return None, "डेल्टा पर कोई प्रोडक्ट उपलब्ध नहीं है।"
+            prod_url = "https://api.delta.exchange/v2/products"
+            response = requests.get(prod_url).json()
+            products = response.get("result", [])
+            if not products and isinstance(response, list):
+                products = response
+            for p in products:
+                if str(p.get("symbol", "")).strip().upper() == target_symbol:
+                    product_id = p.get("id")
+                    break
+                    
+        if not product_id:
+            return None, f"डेल्टा पर {target_symbol} की आईडी नहीं मिली।"
             
-        # 1 मिनट की कैंडल फेच करना
         candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=5"
         candle_res = requests.get(candles_url).json()
         
         raw_candles = candle_res.get("result", [])
         if not raw_candles:
-            return None, f"कैंडल डेटा खाली है for {contract_symbol}"
+            return None, f"कैंडल डेटा खाली है for {target_symbol}"
             
         df = pd.DataFrame(raw_candles, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
-        return df.to_string(), contract_symbol
+        return df.to_string(), target_symbol
         
     except Exception as e:
         return None, str(e)
 
-def run_scalp_ai(market_data):
+def run_scalp_ai(market_data, symbol):
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
         return "GROQ_API_KEY missing!"
     
     client = Groq(api_key=api_key)
     prompt = f"""
-    You are an aggressive Crypto Scalping AI. Look at this 1-minute price action for ArcUSD:
+    You are an aggressive Crypto Scalping AI. Look at this 1-minute price action for {symbol}:
     {market_data}
     Give an immediate scalp decision in one exact word:
     - BUY or SELL (No WAIT, give a clear direction based on momentum).
@@ -88,11 +102,10 @@ def execute_delta_scalp(signal, target_symbol):
         })
         exchange.load_markets()
         
-        # ट्रेड एग्जीक्यूट करना
-        trade_sym = target_symbol if target_symbol in exchange.symbols else 'ARCUSD'
+        trade_sym = target_symbol if target_symbol in exchange.symbols else 'BTCUSD'
         if trade_sym not in exchange.symbols:
             for s in exchange.symbols:
-                if 'ARC' in s.upper():
+                if target_symbol.replace("USD", "") in s.upper():
                     trade_sym = s
                     break
 
@@ -121,14 +134,14 @@ def execute_delta_scalp(signal, target_symbol):
     except Exception as e:
         return f"❌ Trade Execution Error: {str(e)}"
 
-# --- UI Interface ---
+# --- 2. यूजर सिर्फ बटन दबाएगा और सब काम AI करेगा ---
 if st.button("⚡ Run Instant Scalp & Risk Manager"):
-    with st.spinner("डेल्टा एक्सचेंज से लाइव डेटा लिया जा रहा है..."):
-        data, active_symbol = fetch_delta_market_data()
+    with st.spinner(f"{selected_coin} पर AI द्वारा ट्रेड लिया जा रहा है..."):
+        data, active_symbol = fetch_delta_market_data(selected_coin, product_map)
         if data:
             st.write(f"🔍 Active Symbol: `{active_symbol}`")
-            signal = run_scalp_ai(data)
-            st.info(f"🤖 AI Decision: **{signal}**")
+            signal = run_scalp_ai(data, active_symbol)
+            st.info(f"🤖 Groq AI Decision: **{signal}**")
             
             result_msg = execute_delta_scalp(signal, active_symbol)
             st.success(result_msg)
