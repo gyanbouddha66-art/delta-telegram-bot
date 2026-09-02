@@ -21,7 +21,6 @@ def get_all_delta_symbols():
         for p in products:
             sym = str(p.get("symbol", "")).strip().upper()
             p_id = p.get("id")
-            # केवल फ्यूचर्स/परपेचुअल लें, ऑप्शन (C-/P-) छोड़ें और आईडी ज़रूर होनी चाहिए
             if sym and p_id and not sym.startswith("C-") and not sym.startswith("P-"):
                 symbols.append(sym)
                 product_map[sym] = p_id
@@ -30,7 +29,6 @@ def get_all_delta_symbols():
     except Exception as e:
         return ["ARCUSD", "BTCUSD"], {}
 
-# डेल्टा के सारे कॉइन और उनकी आईडी लोड करना
 all_symbols, product_map = get_all_delta_symbols()
 
 selected_coin = st.selectbox(
@@ -42,31 +40,34 @@ def fetch_delta_market_data(target_symbol, p_map):
     try:
         product_id = p_map.get(target_symbol)
         
-        if not product_id:
-            prod_url = "https://api.delta.exchange/v2/products"
-            response = requests.get(prod_url).json()
-            products = response.get("result", [])
-            if not products and isinstance(response, list):
-                products = response
-            for p in products:
-                if str(p.get("symbol", "")).strip().upper() == target_symbol:
-                    product_id = p.get("id")
+        # 1. पहले डायरेक्ट डेल्टा REST API से कैंडल लाने की कोशिश करें
+        if product_id:
+            candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=10"
+            candle_res = requests.get(candles_url).json()
+            raw_candles = candle_res.get("result", [])
+            if raw_candles:
+                df = pd.DataFrame(raw_candles, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+                df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
+                return df.to_string(), target_symbol
+
+        # 2. अगर REST API से न मिले, तो CCXT के ज़रिए OHLCV डेटा फेच करें (पक्का उपाय)
+        exchange = ccxt.delta({'enableRateLimit': True, 'options': {'defaultType': 'swap'}})
+        exchange.load_markets()
+        
+        ccxt_sym = target_symbol
+        if ccxt_sym not in exchange.symbols:
+            for s in exchange.symbols:
+                if target_symbol.replace("_", "") in s.replace("/", "").upper():
+                    ccxt_sym = s
                     break
                     
-        if not product_id:
-            return None, f"डेल्टा पर {target_symbol} की आईडी नहीं मिली।"
+        ohlcv = exchange.fetch_ohlcv(ccxt_sym, timeframe='1m', limit=10)
+        if ohlcv:
+            df = pd.DataFrame(ohlcv, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
+            df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
+            return df.to_string(), ccxt_sym
             
-        # सीधे प्रोडक्ट आईडी का उपयोग करके 1 मिनट की कैंडल फेच करना
-        candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=10"
-        candle_res = requests.get(candles_url).json()
-        
-        raw_candles = candle_res.get("result", [])
-        if not raw_candles:
-            return None, f"कैंडल डेटा खाली है for {target_symbol} (ID: {product_id})"
-            
-        df = pd.DataFrame(raw_candles, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
-        df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
-        return df.to_string(), target_symbol
+        return None, f"कैंडल डेटा दोनों तरीकों से खाली है for {target_symbol}"
         
     except Exception as e:
         return None, str(e)
@@ -108,7 +109,7 @@ def execute_delta_scalp(signal, target_symbol):
         trade_sym = target_symbol if target_symbol in exchange.symbols else 'BTCUSD'
         if trade_sym not in exchange.symbols:
             for s in exchange.symbols:
-                if target_symbol.replace("_", "").replace("USD", "") in s.upper():
+                if target_symbol.replace("_", "").replace("USD", "") in s.replace("/", "").upper():
                     trade_sym = s
                     break
 
