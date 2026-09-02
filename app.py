@@ -84,10 +84,14 @@ def run_scalp_ai(market_data, symbol):
     """
     
     try:
-        # वर्तमान में 100% एक्टिव और वर्किंग मॉडल
+        # ऑटोमैटिक रूप से आपके अकाउंट पर उपलब्ध मॉडल डिटेक्ट करना
+        models_response = client.models.list()
+        available_models = [m.id for m in models_response.data if "llama" in m.id.lower()]
+        model_to_use = available_models[0] if available_models else "llama-3.3-70b-versatile"
+        
         response = client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile",
+            model=model_to_use,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
