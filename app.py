@@ -11,14 +11,14 @@ from groq import Groq
 
 
 # ============================================================
-# GH BOSS AI - ULTIMATE MULTI-CRYPTO FAST SCALPER
+# GH BOSS AI - ULTIMATE AUTO SCALPER (HINDI & FAST)
 # ============================================================
 
 BASE_URL = "https://api.india.delta.exchange"
 
 LOT_SIZE = 1
-SL_PERCENT = 0.005   # 0.5%
-TP_PERCENT = 0.010   # 1.0%
+SL_PERCENT = 0.005   # 0.5% SL
+TP_PERCENT = 0.010   # 1.0% TP
 
 
 # ============================================================
@@ -26,13 +26,13 @@ TP_PERCENT = 0.010   # 1.0%
 # ============================================================
 
 st.set_page_config(
-    page_title="GH BOSS AI Fast Scalper",
+    page_title="GH BOSS AI Auto Scalper",
     page_icon="⚡",
     layout="wide"
 )
 
-st.title("⚡ GH BOSS AI — AUTOMATED FAST SCALPER")
-st.subheader("Delta Exchange India - Multi-Crypto Engine")
+st.title("⚡ GH BOSS AI — ऑटोमैटिक फास्ट स्केल्पर")
+st.subheader("लाइव मार्केट एनालिसिस और ऑटो ट्रेड एक्जीक्यूशन")
 
 
 # ============================================================
@@ -112,7 +112,7 @@ def delta_request(method, path, params=None, body=None, auth=False):
 
 
 # ============================================================
-# GET ALL TRADABLE PRODUCTS (Pagination Supported)
+# GET SYMBOLS
 # ============================================================
 
 @st.cache_data(ttl=60)
@@ -157,10 +157,6 @@ def get_all_symbols():
     return sorted(list(set(tradable)))
 
 
-# ============================================================
-# MARKET DATA & CANDLES
-# ============================================================
-
 def get_ticker(symbol):
     data = delta_request("GET", f"/v2/tickers/{symbol}")
     return data.get("result", {})
@@ -168,7 +164,7 @@ def get_ticker(symbol):
 
 def get_candles(symbol):
     end_time = int(time.time())
-    start_time = end_time - 3600  # last 1 hour
+    start_time = end_time - 1800  # last 30 mins
 
     params = {
         "resolution": "1m",
@@ -182,23 +178,22 @@ def get_candles(symbol):
 
 
 # ============================================================
-# AI SIGNAL (Groq with Fallback)
+# AGGRESSIVE AI SIGNAL (FORCING BUY/SELL FOR SCALPING)
 # ============================================================
 
 def get_signal(candles, symbol):
-    if not GROQ_API_KEY or len(candles) < 10:
-        return "NO_TRADE"
+    if not GROQ_API_KEY or len(candles) < 5:
+        return "BUY"  # Default fallback to keep scalping fast
 
-    recent = candles[-20:]
+    recent = candles[-10:]
     candle_text = "\n".join(str(c) for c in recent)
 
     prompt = f"""
-You are an ultra-fast 1-minute crypto scalping engine.
+You are an aggressive 1-minute crypto scalping engine. Your job is to find quick momentum and make trades instantly.
 Symbol: {symbol}
-Analyze these 1m candles. Return ONLY one word:
+Analyze these 1m candles. You MUST choose ONLY one word (DO NOT output NO_TRADE unless market is dead):
 BUY
 SELL
-NO_TRADE
 
 CANDLES:
 {candle_text}
@@ -212,19 +207,19 @@ CANDLES:
             res = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0,
+                temperature=0.3,
                 max_tokens=5
             )
             ans = res.choices[0].message.content.strip().upper()
-            if ans in ("BUY", "SELL", "NO_TRADE"):
+            if ans in ("BUY", "SELL"):
                 return ans
         except Exception:
             continue
-    return "NO_TRADE"
+    return "BUY"
 
 
 # ============================================================
-# POSITIONS & ORDERS
+# TRADING FUNCTIONS
 # ============================================================
 
 def get_position(product_id):
@@ -277,61 +272,64 @@ def place_bracket(symbol, side, entry):
 
 
 # ============================================================
-# UI & EXECUTION PANEL
+# STREAMLIT UI & AUTO LOOP
 # ============================================================
 
 symbols_list = get_all_symbols()
 if not symbols_list:
     symbols_list = ["ARCUSD", "BTCUSD", "ETHUSD"]
 
-col1, col2 = st.columns(2)
+col1, col2, col3 = st.columns(3)
 with col1:
-    selected_symbol = st.selectbox("🪙 Select Crypto Symbol", symbols_list, index=0 if "ARCUSD" in symbols_list else 0)
-
+    selected_symbol = st.selectbox("🪙 क्रिप्टो सिंबल चुनें", symbols_list)
 with col2:
-    st.write("### Quick Status")
-    st.write(f"Active Symbol: **{selected_symbol}**")
+    auto_trade = st.checkbox("🔄 ऑटो-स्केल्पिंग मोड चालू करें (Auto Scalping Loop)", value=False)
+with col3:
+    refresh_rate = st.slider("⏱️ रिफ्रेश टाइम (सेकंड)", 5, 30, 5)
 
 st.divider()
 
-if st.button("⚡ FAST SCAN & EXECUTE TRADE"):
-    with st.spinner(f"Analyzing {selected_symbol} & executing fast scalping..."):
+placeholder = st.empty()
+
+def run_scalping():
+    with placeholder.container():
         try:
+            st.info(f"🔍 **{selected_symbol}** के लिए लाइव डेटा और AI सिग्नल चेक हो रहा है...")
             ticker = get_ticker(selected_symbol)
             product_id = ticker.get("product_id")
             mark_price = float(ticker.get("mark_price") or ticker.get("close") or 0)
 
-            st.write(f"📊 Current Mark Price: `{mark_price}`")
+            st.write(f"📊 **करेंट मार्क प्राइस:** `{mark_price}`")
 
-            # Check position
             pos_size = get_position(product_id)
             if pos_size != 0:
-                st.warning(f"⚠️ Already holding position (Size: {pos_size}). New entry skipped.")
+                st.warning(f"⚠️ पहले से पोजीशन खुली हुई है (साइज: {pos_size})। नई एंट्री अभी नहीं ली जाएगी।")
             else:
                 candles = get_candles(selected_symbol)
                 signal = get_signal(candles, selected_symbol)
 
-                st.info(f"🤖 AI Signal for {selected_symbol}: **{signal}**")
+                st.success(f"🤖 **AI सिग्नल:** `{signal}`")
 
-                if signal == "NO_TRADE":
-                    st.warning("⏳ No trade opportunity found by AI right now.")
-                else:
-                    side = "buy" if signal == "BUY" else "sell"
-                    st.success(f"🚀 Placing Fast Market {side.upper()} Order...")
-                    
-                    order_res = place_order(selected_symbol, side)
-                    st.json(order_res)
+                side = "buy" if signal == "BUY" else "sell"
+                st.write(f"🚀 **फास्ट मार्केट {side.upper()} ऑर्डर भेजा जा रहा है...**")
+                
+                order_res = place_order(selected_symbol, side)
+                fill_price = float(order_res.get("average_fill_price") or mark_price)
+                st.json(order_res)
 
-                    fill_price = float(order_res.get("average_fill_price") or mark_price)
-                    
-                    st.success("🎯 Setting Bracket SL & TP...")
-                    bracket_res = place_bracket(selected_symbol, side, fill_price)
-                    st.json(bracket_res)
-                    st.success("✅ Fast Trade & Bracket Successfully Placed!")
+                st.write("🎯 **ब्रैकेट SL और TP सेट किया जा रहा है...**")
+                bracket_res = place_bracket(selected_symbol, side, fill_price)
+                st.json(bracket_res)
+                st.success("✅ **ट्रेड सफलतापूर्वक लग गया और TP/SL सेट हो गया!**")
 
         except Exception as e:
-            st.error(f"❌ Execution Error: {str(e)}")
+            st.error(f"❌ **एरर:** {str(e)}")
 
-st.divider()
-if st.button("🔄 Refresh Market Data"):
-    st.rerun()
+if auto_trade:
+    while True:
+        run_scalping()
+        time.sleep(refresh_rate)
+        st.rerun()
+else:
+    if st.button("⚡ अभी तुरंत एक ट्रेड लो (One-Click Scalp)"):
+        run_scalping()
