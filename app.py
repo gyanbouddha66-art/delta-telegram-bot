@@ -1,47 +1,79 @@
-def get_signal_and_analysis(candles, symbol):
-    if not GROQ_API_KEY or len(candles) < 5:
-        return "BUY", "डेटा कम होने के कारण डिफॉल्ट BUY सिग्नल लिया गया।"
+with tab2:
+    st.markdown("### 💬 GYAN AI Pro ट्रेडिंग मेंटर से सीधी बातचीत")
+    st.markdown("यहाँ आप Universal Trading Institute के इस AI मेंटर से किसी भी कॉइन या अपनी ट्रेडिंग स्ट्रेटजी के बारे में हिंदी में चर्चा कर सकते हैं।")
+    
+    chat_symbol = st.selectbox("चैट के लिए सिंबल चुनें", symbols_list, key="t2_sym")
+    
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-    recent = candles[-10:]
-    candle_text = "\n".join(str(c) for c in recent)
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-    prompt = f"""
-You are an elite Institutional Smart Money Concepts (SMC) & Momentum Trader for GYAN AI Pro.
-Symbol: {symbol}
-Analyze these 1-minute candles using professional trading logic:
-1. Market Structure & Trend (HL/LH shifts).
-2. Institutional Order Flow & Momentum.
+    if user_query := st.chat_input("जैसे पूछें: 'इस कॉइन में फास्ट ट्रेड दो' या 'आज की बेस्ट स्केलपिंग स्ट्रेटजी बताओ'"):
+        st.session_state.messages.append({"role": "user", "content": user_query})
+        with st.chat_message("user"):
+            st.markdown(user_query)
 
-Respond strictly in JSON format with two keys:
-1. "signal": "BUY" or "SELL"
-2. "analysis": A detailed, professional explanation in pure HINDI (हिंदी में) explaining the Order Block/Momentum logic why this trade was chosen.
+        with st.chat_message("assistant"):
+            with st.spinner("GYAN AI मेंटर जवाब तैयार कर रहा है..."):
+                try:
+                    ticker = get_ticker(chat_symbol)
+                    price = ticker.get("mark_price", "N/A")
 
-CANDLES:
-{candle_text}
+                    system_prompt = f"""
+आप GYAN AI Pro के प्रोफेशनल Fast Trading और Scalping मेंटर हैं।
+आप हमेशा शुद्ध हिंदी में जवाब देते हैं।
+
+आपका तरीका हमेशा यह होना चाहिए:
+
+1. पहले एक **साफ और स्मार्ट Fast Trading स्ट्रेटजी** बनाएं।
+2. फिर उसी स्ट्रेटजी के अनुसार **ट्रेड सेटअप** दें।
+3. Entry, Stop Loss (SL) और Take Profit (TP) जरूर बताएं।
+4. ट्रेड Fast और Smart होना चाहिए (जल्दी प्रॉफिट वाला)।
+5. जवाब प्रोफेशनल, स्ट्रक्चर्ड और आसान भाषा में दें।
+
+जवाब का फॉर्मेट हमेशा इस तरह रखें:
+
+**स्ट्रेटजी का नाम:**  
+(यहाँ स्ट्रेटजी का नाम लिखें)
+
+**स्ट्रेटजी का लॉजिक:**  
+(संक्षेप में समझाएं)
+
+**ट्रेड सेटअप:**
+- Direction: Buy / Sell
+- Entry: 
+- Stop Loss: 
+- Take Profit 1: 
+- Take Profit 2: (अगर हो)
+- Risk-Reward: 
+
+**अतिरिक्त सलाह:**  
+(रिस्क मैनेजमेंट या कोई जरूरी बात)
+
+वर्तमान जानकारी:
+कॉइन: {chat_symbol}
+मौजूदा प्राइस: {price}
 """
 
-    client = Groq(api_key=GROQ_API_KEY)
-    models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+                    client = Groq(api_key=GROQ_API_KEY)
+                    res = client.chat.completions.create(
+                        model="llama-3.1-8b-instant",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_query}
+                        ],
+                        temperature=0.3,
+                        max_tokens=1300
+                    )
 
-    for model in models:
-        try:
-            res = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=300
-            )
-            content = res.choices[0].message.content.strip()
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.endswith("```"):
-                content = content[:-3]
-            
-            data = json.loads(content.strip())
-            signal = data.get("signal", "BUY").upper()
-            analysis = data.get("analysis", "विश्लेषण उपलब्ध नहीं है।")
-            if signal in ("BUY", "SELL"):
-                return signal, analysis
-        except Exception:
-            continue
-    return "BUY", "स्मार्ट मनी मोमेंटम के आधार पर ऑटो सिग्नल जनरेट किया गया।"
+                    reply = res.choices[0].message.content
+                    st.markdown(reply)
+                    st.session_state.messages.append({"role": "assistant", "content": reply})
+
+                except Exception as e:
+                    err_msg = f"क्षमा करें, चैट में एरर आ गया: {str(e)}"
+                    st.error(err_msg)
+                    st.session_state.messages.append({"role": "assistant", "content": err_msg})
