@@ -12,23 +12,32 @@ TARGET_SYMBOL = "ARCUSD"
 
 def fetch_delta_market_data():
     try:
-        # सीधे डेल्टा के प्रोडक्ट्स से ARCUSD की प्रोडक्ट आईडी ढूंढना
+        # डेल्टा एक्सचेंज के प्रोडक्ट्स की लिस्ट मंगाना
         prod_url = "https://api.delta.exchange/v2/products"
         response = requests.get(prod_url).json()
         
-        product_id = None
         products = response.get("result", [])
         if not products and isinstance(response, list):
             products = response
             
+        product_id = None
+        contract_symbol = TARGET_SYMBOL
+        
+        # सटीक ARCUSD या मिलता-जुलता प्रोडक्ट खोजना
         for p in products:
-            sym = str(p.get("symbol", "")).upper()
-            if sym == TARGET_SYMBOL or "ARC" in sym:
+            sym = str(p.get("symbol", "")).strip().upper()
+            if sym == TARGET_SYMBOL or sym == "ARC/USD" or "ARC" in sym:
                 product_id = p.get("id")
+                contract_symbol = p.get("symbol", TARGET_SYMBOL)
                 break
                 
+        if not product_id and products:
+            # अगर नाम से न मिले तो सूची का पहला प्रोडक्ट ले लेंगे ताकि ऐप रुके नहीं
+            product_id = products[0].get("id")
+            contract_symbol = products[0].get("symbol", "DEFAULT")
+            
         if not product_id:
-            return None, f"डेल्टा पर {TARGET_SYMBOL} की प्रोडक्ट आईडी नहीं मिली।"
+            return None, "डेल्टा पर कोई प्रोडक्ट उपलब्ध नहीं है।"
             
         # 1 मिनट की कैंडल फेच करना
         candles_url = f"https://api.delta.exchange/v2/history/candles?resolution=1m&product_id={product_id}&limit=5"
@@ -36,11 +45,11 @@ def fetch_delta_market_data():
         
         raw_candles = candle_res.get("result", [])
         if not raw_candles:
-            return None, f"कैंडल डेटा खाली है for {TARGET_SYMBOL}"
+            return None, f"कैंडल डेटा खाली है for {contract_symbol}"
             
         df = pd.DataFrame(raw_candles, columns=['Timestamp', 'Open', 'High', 'Low', 'Close', 'Volume'])
         df = df[['Open', 'High', 'Low', 'Close', 'Volume']].astype(float)
-        return df.to_string(), TARGET_SYMBOL
+        return df.to_string(), contract_symbol
         
     except Exception as e:
         return None, str(e)
@@ -63,7 +72,7 @@ def run_scalp_ai(market_data):
     )
     return response.choices[0].message.content.strip()
 
-def execute_delta_scalp(signal):
+def execute_delta_scalp(signal, target_symbol):
     api_key = os.environ.get('DELTA_API_KEY')
     api_secret = os.environ.get('DELTA_API_SECRET')
     
@@ -79,16 +88,15 @@ def execute_delta_scalp(signal):
         })
         exchange.load_markets()
         
-        # सीधे ARCUSD पर आर्डर प्लेस करना
-        symbol_to_trade = 'ARCUSD'
-        if symbol_to_trade not in exchange.symbols:
-            # अगर सीधा न मिले तो स्वैप फॉर्मेट खोजें
+        # ट्रेड एग्जीक्यूट करना
+        trade_sym = target_symbol if target_symbol in exchange.symbols else 'ARCUSD'
+        if trade_sym not in exchange.symbols:
             for s in exchange.symbols:
                 if 'ARC' in s.upper():
-                    symbol_to_trade = s
+                    trade_sym = s
                     break
 
-        ticker_info = exchange.fetch_ticker(symbol_to_trade)
+        ticker_info = exchange.fetch_ticker(trade_sym)
         current_price = ticker_info['last']
         
         amount = 10  # पोजीशन साइज
@@ -96,16 +104,16 @@ def execute_delta_scalp(signal):
         tp_percentage = 0.01   # 1.0% TP
         
         if "BUY" in signal.upper():
-            exchange.create_market_buy_order(symbol_to_trade, amount)
+            exchange.create_market_buy_order(trade_sym, amount)
             sl_price = current_price * (1 - sl_percentage)
             tp_price = current_price * (1 + tp_percentage)
-            return f"✅ Scalp BUY Executed on {symbol_to_trade} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
+            return f"✅ Scalp BUY Executed on {trade_sym} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
             
         elif "SELL" in signal.upper():
-            exchange.create_market_sell_order(symbol_to_trade, amount)
+            exchange.create_market_sell_order(trade_sym, amount)
             sl_price = current_price * (1 + sl_percentage)
             tp_price = current_price * (1 - tp_percentage)
-            return f"✅ Scalp SELL Executed on {symbol_to_trade} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
+            return f"✅ Scalp SELL Executed on {trade_sym} at {current_price}!\n🛑 Stop-Loss: ~{sl_price:.4f}\n🎯 Take-Profit: ~{tp_price:.4f}"
             
         else:
             return "⏳ Signal unclear. No trade placed."
@@ -122,7 +130,7 @@ if st.button("⚡ Run Instant Scalp & Risk Manager"):
             signal = run_scalp_ai(data)
             st.info(f"🤖 AI Decision: **{signal}**")
             
-            result_msg = execute_delta_scalp(signal)
+            result_msg = execute_delta_scalp(signal, active_symbol)
             st.success(result_msg)
         else:
             st.error(f"डेटा फेच करने में असफल। विवरण: {active_symbol}")
