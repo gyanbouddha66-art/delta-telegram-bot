@@ -11,7 +11,7 @@ from groq import Groq
 
 
 # ============================================================
-# GH BOSS AI - ULTIMATE AUTO SCALPER (HINDI & FAST)
+# GH BOSS AI - ULTIMATE PREMIUM FINTECH INTERFACE
 # ============================================================
 
 BASE_URL = "https://api.india.delta.exchange"
@@ -22,17 +22,90 @@ TP_PERCENT = 0.010   # 1.0% TP
 
 
 # ============================================================
-# PAGE CONFIG
+# PAGE CONFIG & STYLING (CUSTOM CSS)
 # ============================================================
 
 st.set_page_config(
-    page_title="GH BOSS AI Auto Scalper",
+    page_title="GH BOSS AI Pro Scalper",
     page_icon="⚡",
     layout="wide"
 )
 
-st.title("⚡ GH BOSS AI — ऑटोमैटिक फास्ट स्केल्पर")
-st.subheader("लाइव मार्केट एनालिसिस और ऑटो ट्रेड एक्जीक्यूशन")
+st.markdown("""
+    <style>
+    /* Main Background & Font */
+    .stApp {
+        background-color: #0b0f19;
+        color: #f3f4f6;
+    }
+    
+    /* Header Styling */
+    h1, h2, h3 {
+        color: #ffffff;
+        font-family: 'Inter', sans-serif;
+    }
+
+    /* Metric Cards Styling */
+    div.stMetric {
+        background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+        border: 1px solid #374151;
+        padding: 15px;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    }
+    div.stMetric label {
+        color: #9ca3af !important;
+        font-weight: 600;
+    }
+    div.stMetric div[data-testid="stMetricValue"] {
+        color: #10b981 !important;
+        font-size: 1.8rem !important;
+    }
+
+    /* Buttons Styling */
+    .stButton > button {
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 0.6rem 1.2rem;
+        font-weight: 600;
+        width: 100%;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        transition: all 0.3s ease;
+    }
+    .stButton > button:hover {
+        background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+        box-shadow: 0 6px 16px rgba(59, 130, 246, 0.5);
+        transform: translateY(-1px);
+    }
+
+    /* Tabs Styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: #111827;
+        padding: 6px;
+        border-radius: 10px;
+        border: 1px solid #374151;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 45px;
+        color: #9ca3af;
+        border-radius: 6px;
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #3b82f6 !important;
+        color: white !important;
+    }
+
+    /* Input & Selectbox Styling */
+    .stSelectbox div[data-baseweb="select"], .stSlider {
+        background-color: #1f2937;
+        border-radius: 8px;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 
 # ============================================================
@@ -67,7 +140,7 @@ def delta_request(method, path, params=None, body=None, auth=False):
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "User-Agent": "GH-BOSS-AI"
+        "User-Agent": "GH-BOSS-AI-PRO"
     }
 
     if auth:
@@ -112,7 +185,7 @@ def delta_request(method, path, params=None, body=None, auth=False):
 
 
 # ============================================================
-# GET SYMBOLS
+# GET SYMBOLS & DATA
 # ============================================================
 
 @st.cache_data(ttl=60)
@@ -164,7 +237,7 @@ def get_ticker(symbol):
 
 def get_candles(symbol):
     end_time = int(time.time())
-    start_time = end_time - 1800  # last 30 mins
+    start_time = end_time - 1800
 
     params = {
         "resolution": "1m",
@@ -177,23 +250,20 @@ def get_candles(symbol):
     return data.get("result", [])
 
 
-# ============================================================
-# AGGRESSIVE AI SIGNAL (FORCING BUY/SELL FOR SCALPING)
-# ============================================================
-
-def get_signal(candles, symbol):
+def get_signal_and_analysis(candles, symbol):
     if not GROQ_API_KEY or len(candles) < 5:
-        return "BUY"  # Default fallback to keep scalping fast
+        return "BUY", "डेटा कम होने के कारण डिफॉल्ट BUY सिग्नल लिया गया।"
 
     recent = candles[-10:]
     candle_text = "\n".join(str(c) for c in recent)
 
     prompt = f"""
-You are an aggressive 1-minute crypto scalping engine. Your job is to find quick momentum and make trades instantly.
+You are an expert AI crypto scalper and mentor.
 Symbol: {symbol}
-Analyze these 1m candles. You MUST choose ONLY one word (DO NOT output NO_TRADE unless market is dead):
-BUY
-SELL
+Analyze these 1-minute candles. 
+Respond strictly in JSON format with two keys:
+1. "signal": "BUY" or "SELL"
+2. "analysis": A detailed explanation in HINDI (हिंदी में) explaining why this trade/signal was chosen based on price action and momentum.
 
 CANDLES:
 {candle_text}
@@ -208,19 +278,23 @@ CANDLES:
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=5
+                max_tokens=300
             )
-            ans = res.choices[0].message.content.strip().upper()
-            if ans in ("BUY", "SELL"):
-                return ans
+            content = res.choices[0].message.content.strip()
+            if content.startswith("```json"):
+                content = content[7:]
+            if content.endswith("```"):
+                content = content[:-3]
+            
+            data = json.loads(content.strip())
+            signal = data.get("signal", "BUY").upper()
+            analysis = data.get("analysis", "विश्लेषण उपलब्ध नहीं है।")
+            if signal in ("BUY", "SELL"):
+                return signal, analysis
         except Exception:
             continue
-    return "BUY"
+    return "BUY", "मार्केट मोमेंटम के आधार पर ऑटो BUY सिग्नल जनरेट किया गया।"
 
-
-# ============================================================
-# TRADING FUNCTIONS
-# ============================================================
 
 def get_position(product_id):
     data = delta_request("GET", "/v2/positions", params={"product_id": product_id}, auth=True)
@@ -234,7 +308,7 @@ def get_position(product_id):
     return 0.0
 
 
-def place_order(symbol, side):
+def place_market_order(symbol, side):
     body = {
         "product_symbol": symbol,
         "size": LOT_SIZE,
@@ -246,90 +320,190 @@ def place_order(symbol, side):
     return data.get("result", {})
 
 
-def place_bracket(symbol, side, entry):
-    entry = float(entry)
-    if side == "buy":
-        stop = entry * (1 - SL_PERCENT)
-        target = entry * (1 + TP_PERCENT)
+def place_sl_tp_orders(symbol, entry_side, entry_price):
+    entry_price = float(entry_price)
+    if entry_side == "buy":
+        exit_side = "sell"
+        stop_price = entry_price * (1 - SL_PERCENT)
+        target_price = entry_price * (1 + TP_PERCENT)
     else:
-        stop = entry * (1 + SL_PERCENT)
-        target = entry * (1 - TP_PERCENT)
+        exit_side = "buy"
+        stop_price = entry_price * (1 + SL_PERCENT)
+        target_price = entry_price * (1 - TP_PERCENT)
 
-    body = {
+    results = []
+
+    # Stop Loss
+    sl_body = {
         "product_symbol": symbol,
-        "stop_loss_order": {
-            "order_type": "market_order",
-            "stop_price": str(round(stop, 8))
-        },
-        "take_profit_order": {
-            "order_type": "limit_order",
-            "limit_price": str(round(target, 8))
-        },
-        "bracket_stop_trigger_method": "mark_price"
+        "size": LOT_SIZE,
+        "side": exit_side,
+        "order_type": "stop_order",
+        "stop_price": str(round(stop_price, 8)),
+        "reduce_only": True,
+        "time_in_force": "gtc"
     }
-    data = delta_request("POST", "/v2/orders/bracket", body=body, auth=True)
-    return data.get("result", {})
+    try:
+        sl_res = delta_request("POST", "/v2/orders", body=sl_body, auth=True)
+        results.append(("Stop Loss", sl_res))
+    except Exception as e:
+        results.append(("Stop Loss Error", str(e)))
+
+    # Take Profit
+    tp_body = {
+        "product_symbol": symbol,
+        "size": LOT_SIZE,
+        "side": exit_side,
+        "order_type": "limit_order",
+        "limit_price": str(round(target_price, 8)),
+        "reduce_only": True,
+        "time_in_force": "gtc"
+    }
+    try:
+        tp_res = delta_request("POST", "/v2/orders", body=tp_body, auth=True)
+        results.append(("Take Profit", tp_res))
+    except Exception as e:
+        results.append(("Take Profit Error", str(e)))
+
+    return results
 
 
 # ============================================================
-# STREAMLIT UI & AUTO LOOP
+# MAIN UI LAYOUT
 # ============================================================
+
+st.markdown("# ⚡ GH BOSS AI — ULTIMATE TRADING ENGINE")
+st.markdown("### *Institutional-Grade Smart Scalping & AI Mentor Terminal*")
+st.divider()
 
 symbols_list = get_all_symbols()
 if not symbols_list:
     symbols_list = ["ARCUSD", "BTCUSD", "ETHUSD"]
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    selected_symbol = st.selectbox("🪙 क्रिप्टो सिंबल चुनें", symbols_list)
-with col2:
-    auto_trade = st.checkbox("🔄 ऑटो-स्केल्पिंग मोड चालू करें (Auto Scalping Loop)", value=False)
-with col3:
-    refresh_rate = st.slider("⏱️ रिफ्रेश टाइम (सेकंड)", 5, 30, 5)
+tab1, tab2 = st.tabs(["⚡ लाइव स्केल्पर टर्मिनल", "💬 AI मेंटर & चैट रूम"])
 
-st.divider()
+with tab1:
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        selected_symbol = st.selectbox("🪙 क्रिप्टो सिंबल चुनें", symbols_list, key="t1_sym")
+    with c2:
+        auto_trade = st.checkbox("🔄 ऑटो-स्केल्पिंग लूप मोड", value=False)
+    with c3:
+        refresh_rate = st.slider("⏱️ रिफ्रेश इंटरवल (सेकंड)", 5, 30, 5)
 
-placeholder = st.empty()
+    st.markdown("<br>", unsafe_allow_html=True)
 
-def run_scalping():
-    with placeholder.container():
-        try:
-            st.info(f"🔍 **{selected_symbol}** के लिए लाइव डेटा और AI सिग्नल चेक हो रहा है...")
-            ticker = get_ticker(selected_symbol)
-            product_id = ticker.get("product_id")
-            mark_price = float(ticker.get("mark_price") or ticker.get("close") or 0)
+    # Fetch live ticker stats for top display
+    try:
+        live_ticker = get_ticker(selected_symbol)
+        m_price = live_ticker.get("mark_price", live_ticker.get("close", "0.0"))
+        high_p = live_ticker.get("high", "0.0")
+        low_p = live_ticker.get("low", "0.0")
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Current Mark Price", f"{float(m_price):.4f}")
+        m2.metric("24h High", f"{float(high_p):.4f}")
+        m3.metric("24h Low", f"{float(low_p):.4f}")
+    except Exception:
+        pass
 
-            st.write(f"📊 **करेंट मार्क प्राइस:** `{mark_price}`")
+    st.divider()
+    placeholder = st.empty()
 
-            pos_size = get_position(product_id)
-            if pos_size != 0:
-                st.warning(f"⚠️ पहले से पोजीशन खुली हुई है (साइज: {pos_size})। नई एंट्री अभी नहीं ली जाएगी।")
-            else:
-                candles = get_candles(selected_symbol)
-                signal = get_signal(candles, selected_symbol)
+    def run_scalping():
+        with placeholder.container():
+            try:
+                with st.spinner(f"🔍 {selected_symbol} का मार्केट स्कैन हो रहा है..."):
+                    ticker = get_ticker(selected_symbol)
+                    product_id = ticker.get("product_id")
+                    mark_price = float(ticker.get("mark_price") or ticker.get("close") or 0)
 
-                st.success(f"🤖 **AI सिग्नल:** `{signal}`")
+                pos_size = get_position(product_id)
+                if pos_size != 0:
+                    st.warning(f"⚠️ **पोजीशन पहले से खुली है** (साइज: `{pos_size}`)। नई एंट्री होल्ड पर है।")
+                else:
+                    candles = get_candles(selected_symbol)
+                    signal, analysis = get_signal_and_analysis(candles, selected_symbol)
 
-                side = "buy" if signal == "BUY" else "sell"
-                st.write(f"🚀 **फास्ट मार्केट {side.upper()} ऑर्डर भेजा जा रहा है...**")
-                
-                order_res = place_order(selected_symbol, side)
-                fill_price = float(order_res.get("average_fill_price") or mark_price)
-                st.json(order_res)
+                    st.success(f"🤖 **AI सिग्नल डिटेक्टेड:** `{signal}`")
+                    st.info(f"💡 **AI ट्रेड एनालिसिस & स्ट्रेटजी:**\n\n{analysis}")
 
-                st.write("🎯 **ब्रैकेट SL और TP सेट किया जा रहा है...**")
-                bracket_res = place_bracket(selected_symbol, side, fill_price)
-                st.json(bracket_res)
-                st.success("✅ **ट्रेड सफलतापूर्वक लग गया और TP/SL सेट हो गया!**")
+                    side = "buy" if signal == "BUY" else "sell"
+                    st.markdown(f"🚀 **मार्केट {side.upper()} आर्डर भेजा जा रहा है...**")
+                    
+                    order_res = place_market_order(selected_symbol, side)
+                    fill_price = float(order_res.get("average_fill_price") or mark_price)
+                    
+                    with st.expander("📦 देखें ऑर्डर डिटेल्स"):
+                        st.json(order_res)
 
-        except Exception as e:
-            st.error(f"❌ **एरर:** {str(e)}")
+                    st.markdown("🎯 **ऑटो TP & SL आर्डर सेट किए जा रहे हैं...**")
+                    sl_tp_res = place_sl_tp_orders(selected_symbol, side, fill_price)
+                    
+                    with st.expander("🛡️ देखें TP/SL डिटेल्स"):
+                        for label, res in sl_tp_res:
+                            st.write(f"🔹 **{label}:**")
+                            st.json(res)
 
-if auto_trade:
-    while True:
-        run_scalping()
-        time.sleep(refresh_rate)
-        st.rerun()
-else:
-    if st.button("⚡ अभी तुरंत एक ट्रेड लो (One-Click Scalp)"):
-        run_scalping()
+                    st.balloons()
+                    st.success("✅ **ट्रेड सफलतापूर्वक निष्पादित और सुरक्षित हो गया है!**")
+
+            except Exception as e:
+                st.error(f"❌ **एक्जीक्यूशन एरर:** {str(e)}")
+
+    if auto_trade:
+        while True:
+            run_scalping()
+            time.sleep(refresh_rate)
+            st.rerun()
+    else:
+        if st.button("⚡ तुरंत एक ट्रेड निष्पादित करें (One-Click Execute)"):
+            run_scalping()
+
+with tab2:
+    st.markdown("### 💬 AI ट्रेडिंग मेंटर से सीधी बातचीत")
+    st.markdown("यहाँ आप किसी भी कॉइन या अपनी ट्रेडिंग स्ट्रजी के बारे में हिंदी में चर्चा कर सकते हैं।")
+
+    chat_symbol = st.selectbox("चैट के लिए सिंबल चुनें", symbols_list, key="t2_sym")
+    
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if user_query := st.chat_input("जैसे पूछें: 'इस कॉइन में अगला मूव क्या हो सकता है?'"):
+        st.session_state.messages.append({"role": "user", "content": user_query})
+        with st.chat_message("user"):
+            st.markdown(user_query)
+
+        with st.chat_message("assistant"):
+            with st.spinner("AI मेंटर जवाब तैयार कर रहा है..."):
+                try:
+                    candles = get_candles(chat_symbol)
+                    ticker = get_ticker(chat_symbol)
+                    price = ticker.get("mark_price", "N/A")
+                    
+                    chat_prompt = f"""
+You are an expert AI trading mentor in Hindi. 
+User query: "{user_query}"
+Current Coin: {chat_symbol}
+Current Price: {price}
+Recent Candles summary: {candles[-5:] if len(candles)>=5 else candles}
+
+Provide a helpful, precise, and professional response in pure Hindi.
+"""
+                    client = Groq(api_key=GROQ_API_KEY)
+                    res = client.chat.completions.create(
+                        model="llama-3.1-8b-instant",
+                        messages=[{"role": "user", "content": chat_prompt}],
+                        temperature=0.4
+                    )
+                    reply = res.choices[0].message.content
+                    st.markdown(reply)
+                    st.session_state.messages.append({"role": "assistant", "content": reply})
+                except Exception as e:
+                    err_msg = f"क्षमा करें, एरर आ गया: {str(e)}"
+                    st.error(err_msg)
+                    st.session_state.messages.append({"role": "assistant", "content": err_msg})
