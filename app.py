@@ -1,3 +1,16 @@
+हाँ Sir. नीचे पूरा updated app.py है। इसमें:
+✅ GPT-OSS 120B
+✅ JSON Schema + reasoning_effort=low fix
+✅ Delta India API
+✅ BUY / SELL / NO TRADE
+✅ Market Order
+✅ Bracket TP + SL
+✅ AI Chat
+✅ ARCUSD सहित symbol selection
+✅ Exact error display
+✅ Syntax-safe try/except
+✅ Chat और Trading दोनों अलग-अलग काम करेंगे
+पुरानी app.py पूरी हटाकर यह पूरा code paste करें।
 # ============================================================
 # ⚡ GYAN AI PRO
 # Delta Exchange India + Groq GPT-OSS 120B
@@ -1871,3 +1884,19 @@ st.caption(
     "GYAN AI Pro • Delta Exchange India • "
     "Groq GPT-OSS 120B"
 )
+Render में Environment Variables
+ये तीनों मौजूद होने चाहिए:
+DELTA_API_KEY
+DELTA_API_SECRET
+GROQ_API_KEY
+और कोई पुराना llama-3.1-8b-instant नहीं रखना है।
+सबसे जरूरी बदलाव
+इस version में Signal के लिए:
+"reasoning_effort": "low"
+और:
+"max_completion_tokens": 512
+तथा strict JSON schema है। इससे तुम्हारा आया हुआ:
+max completion tokens reached before generating
+a valid document
+वाला error target किया गया है।
+पहले Auto Trade OFF रखकर GET AI SIGNAL दबाना। Signal सही BUY/SELL/NO TRADE आने लगे तभी Auto Trade ON करना—क्योंकि ON होने पर वास्तविक Delta market order लगाया जा सकता है।
