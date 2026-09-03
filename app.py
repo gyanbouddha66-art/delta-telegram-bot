@@ -33,12 +33,38 @@ st.set_page_config(
 
 
 # ============================================================
-# API KEYS
+# API KEYS & TELEGRAM SETTINGS (SIDEBAR OR ENV)
 # ============================================================
 
-DELTA_API_KEY = os.getenv("DELTA_API_KEY", "")
-DELTA_API_SECRET = os.getenv("DELTA_API_SECRET", "")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+st.sidebar.title("⚙️ GYAN AI Settings")
+
+DELTA_API_KEY = st.sidebar.text_input("Delta API Key", type="password", value=os.getenv("DELTA_API_KEY", ""))
+DELTA_API_SECRET = st.sidebar.text_input("Delta API Secret", type="password", value=os.getenv("DELTA_API_SECRET", ""))
+GROQ_API_KEY = st.sidebar.text_input("Groq API Key", type="password", value=os.getenv("GROQ_API_KEY", ""))
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("📱 Telegram Alert Settings")
+TELEGRAM_BOT_TOKEN = st.sidebar.text_input("Telegram Bot Token", type="password", value=os.getenv("TELEGRAM_BOT_TOKEN", ""))
+TELEGRAM_CHAT_ID = st.sidebar.text_input("Telegram Chat ID", value=os.getenv("TELEGRAM_CHAT_ID", ""))
+
+
+# ============================================================
+# TELEGRAM ALERT FUNCTION
+# ============================================================
+
+def send_telegram_alert(message):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message,
+        "parse_mode": "Markdown"
+    }
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception:
+        pass
 
 
 # ============================================================
@@ -917,6 +943,19 @@ with tab1:
                             )
 
                     # ====================================================
+                    # TELEGRAM ALERT SENT
+                    # ====================================================
+                    tg_msg = (
+                        f"⚡ *GYAN AI Trade Executed*\n\n"
+                        f"🪙 **Symbol:** `{selected_symbol}`\n"
+                        f"📊 **Side:** `{side.upper()}`\n"
+                        f"💰 **Entry Price:** `{fill_price:.4f}`\n"
+                        f"🛡️ **Stop Loss:** `{stop_price:.4f}`\n"
+                        f"🎯 **Take Profit:** `{target_price:.4f}`"
+                    )
+                    send_telegram_alert(tg_msg)
+
+                    # ====================================================
                     # STRATEGY
                     # ====================================================
 
@@ -1162,5 +1201,5 @@ with tab2:
 st.divider()
 
 st.caption(
-    "⚡ GYAN AI Pro | Delta Exchange India + Groq AI"
+    "⚡ GYAN AI Pro | Delta Exchange India + Groq AI + Telegram Bot"
 )
