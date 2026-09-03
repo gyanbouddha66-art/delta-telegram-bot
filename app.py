@@ -10,27 +10,23 @@ import streamlit as st
 
 
 # ============================================================
-# GYAN AI PRO
-# DELTA EXCHANGE INDIA + GROQ GPT-OSS 120B
-# TP + SL BRACKET + CHAT
+# CONFIG
 # ============================================================
 
 BASE_URL = "https://api.india.delta.exchange"
-
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "openai/gpt-oss-120b"
 
 LOT_SIZE = 1
 
-# Original risk settings
-SL_PERCENT = 0.005       # 0.50%
-TP_PERCENT = 0.010       # 1.00%
+SL_PERCENT = 0.005
+TP_PERCENT = 0.010
 
 REQUEST_TIMEOUT = 20
 
 
 # ============================================================
-# STREAMLIT
+# PAGE
 # ============================================================
 
 st.set_page_config(
@@ -41,7 +37,7 @@ st.set_page_config(
 
 
 # ============================================================
-# ENVIRONMENT VARIABLES
+# ENV
 # ============================================================
 
 DELTA_API_KEY = os.getenv("DELTA_API_KEY", "").strip()
@@ -50,7 +46,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 
 
 # ============================================================
-# SESSION STATE
+# SESSION
 # ============================================================
 
 if "messages" not in st.session_state:
@@ -70,16 +66,13 @@ if "last_bracket" not in st.session_state:
 
 
 # ============================================================
-# DELTA API SIGNATURE
+# DELTA REQUEST
 # ============================================================
 
 def delta_request(method, path, params=None, body=None, auth=False):
 
-    if params is None:
-        params = {}
-
-    if body is None:
-        body = {}
+    params = params or {}
+    body = body or {}
 
     method = method.upper()
 
@@ -96,7 +89,7 @@ def delta_request(method, path, params=None, body=None, auth=False):
     if params:
         query_string = "?" + urlencode(params)
 
-    timestamp = int(time.time())
+    timestamp = str(int(time.time()))
 
     headers = {
         "Accept": "application/json",
@@ -113,7 +106,7 @@ def delta_request(method, path, params=None, body=None, auth=False):
 
         message = (
             method
-            + str(timestamp)
+            + timestamp
             + path
             + query_string
             + body_text
@@ -126,7 +119,7 @@ def delta_request(method, path, params=None, body=None, auth=False):
         ).hexdigest()
 
         headers["api-key"] = DELTA_API_KEY
-        headers["timestamp"] = str(timestamp)
+        headers["timestamp"] = timestamp
         headers["signature"] = signature
 
     try:
@@ -165,7 +158,7 @@ def delta_request(method, path, params=None, body=None, auth=False):
 
         raise Exception(
             f"Delta HTTP {response.status_code}: "
-            f"{response.text[:1000]}"
+            f"{response.text[:1500]}"
         )
 
     if response.status_code >= 400:
@@ -186,14 +179,13 @@ def delta_request(method, path, params=None, body=None, auth=False):
 
 
 # ============================================================
-# DELTA PRODUCTS
+# PRODUCTS
 # ============================================================
 
 @st.cache_data(ttl=300)
 def get_all_products():
 
     products = []
-
     after = None
 
     for _ in range(20):
@@ -210,24 +202,29 @@ def get_all_products():
             data = delta_request(
                 "GET",
                 "/v2/products",
-                params=params,
-                auth=False
+                params=params
             )
 
         except Exception:
 
             break
 
-        result = data.get("result", [])
+        result = data.get(
+            "result",
+            []
+        )
 
         if not result:
             break
 
         products.extend(result)
 
-        meta = data.get("meta", {})
-
-        after = meta.get("after")
+        after = data.get(
+            "meta",
+            {}
+        ).get(
+            "after"
+        )
 
         if not after:
             break
@@ -238,17 +235,15 @@ def get_all_products():
 @st.cache_data(ttl=300)
 def get_all_symbols():
 
-    products = get_all_products()
+    symbols = []
 
-    tradable = []
-
-    for p in products:
+    for p in get_all_products():
 
         symbol = str(
             p.get("symbol", "")
         ).upper().strip()
 
-        ptype = str(
+        product_type = str(
             p.get("product_type", "")
         ).lower()
 
@@ -259,7 +254,7 @@ def get_all_symbols():
         if not symbol:
             continue
 
-        if "perpetual" not in ptype:
+        if "perpetual" not in product_type:
             continue
 
         if symbol.startswith("C-"):
@@ -268,32 +263,30 @@ def get_all_symbols():
         if symbol.startswith("P-"):
             continue
 
-        if state and state not in [
+        if state and state not in (
             "live",
             "active"
-        ]:
+        ):
             continue
 
-        tradable.append(symbol)
+        symbols.append(symbol)
 
-    return sorted(
-        list(set(tradable))
-    )
+    return sorted(set(symbols))
 
 
 def get_product(symbol):
 
     symbol = symbol.upper().strip()
 
-    products = get_all_products()
+    for product in get_all_products():
 
-    for p in products:
-
-        if str(
-            p.get("symbol", "")
-        ).upper().strip() == symbol:
-
-            return p
+        if (
+            str(product.get("symbol", ""))
+            .upper()
+            .strip()
+            == symbol
+        ):
+            return product
 
     return None
 
@@ -306,8 +299,7 @@ def get_ticker(symbol):
 
     data = delta_request(
         "GET",
-        f"/v2/tickers/{symbol}",
-        auth=False
+        f"/v2/tickers/{symbol}"
     )
 
     return data.get(
@@ -323,37 +315,35 @@ def get_ticker(symbol):
 def get_candles(symbol):
 
     end_time = int(time.time())
-
     start_time = end_time - 1800
-
-    params = {
-        "resolution": "1m",
-        "symbol": symbol,
-        "start": start_time,
-        "end": end_time
-    }
 
     data = delta_request(
         "GET",
         "/v2/history/candles",
-        params=params,
-        auth=False
+        params={
+            "resolution": "1m",
+            "symbol": symbol,
+            "start": start_time,
+            "end": end_time
+        }
     )
 
-    result = data.get(
+    return data.get(
         "result",
         []
     )
 
-    return result
-
 
 # ============================================================
-# GROQ RAW REQUEST
+# GROQ
 # ============================================================
 
-def groq_request(messages, max_tokens=1000, temperature=0.3,
-                 response_format=None):
+def groq_request(
+    messages,
+    max_tokens=1000,
+    temperature=0.3,
+    response_format=None
+):
 
     if not GROQ_API_KEY:
 
@@ -374,7 +364,7 @@ def groq_request(messages, max_tokens=1000, temperature=0.3,
         "max_tokens": max_tokens
     }
 
-    if response_format is not None:
+    if response_format:
 
         payload["response_format"] = response_format
 
@@ -396,14 +386,13 @@ def groq_request(messages, max_tokens=1000, temperature=0.3,
     except requests.exceptions.ConnectionError:
 
         raise Exception(
-            "Groq API connection error। "
-            "Render server से Groq तक connection नहीं बन रहा।"
+            "Groq API connection error।"
         )
 
     except Exception as e:
 
         raise Exception(
-            f"Groq request error: {type(e).__name__}: {e}"
+            f"Groq connection error: {e}"
         )
 
     try:
@@ -414,23 +403,24 @@ def groq_request(messages, max_tokens=1000, temperature=0.3,
 
         raise Exception(
             f"Groq HTTP {response.status_code}: "
-            f"{response.text[:1000]}"
+            f"{response.text[:1500]}"
         )
 
     if response.status_code >= 400:
 
-        error_text = data
-
         if isinstance(data, dict):
 
-            error_text = data.get(
+            error = data.get(
                 "error",
                 data
             )
 
+        else:
+
+            error = data
+
         raise Exception(
-            f"Groq HTTP {response.status_code}: "
-            f"{error_text}"
+            f"Groq HTTP {response.status_code}: {error}"
         )
 
     choices = data.get(
@@ -441,24 +431,20 @@ def groq_request(messages, max_tokens=1000, temperature=0.3,
     if not choices:
 
         raise Exception(
-            f"Groq ने कोई response नहीं दिया: {data}"
+            f"Groq response खाली है: {data}"
         )
 
-    message = choices[0].get(
+    content = choices[0].get(
         "message",
         {}
-    )
-
-    content = message.get(
+    ).get(
         "content",
         ""
     )
 
-    if content is None:
-
-        content = ""
-
-    return content.strip()
+    return str(
+        content or ""
+    ).strip()
 
 
 # ============================================================
@@ -485,101 +471,104 @@ def get_signal_and_analysis(
     )
 
     system_prompt = """
-You are an elite Institutional Smart Money Concepts (SMC)
-and Momentum Trader for GYAN AI Pro.
+You are GYAN AI Pro institutional SMC
+and momentum trading analyst.
 
-Analyze 1-minute cryptocurrency candles.
+Analyze 1-minute crypto candles.
 
-Use:
-1. Market Structure
-2. Higher High / Higher Low
-3. Lower High / Lower Low
-4. Momentum
-5. Order Flow
-6. Breakout / rejection
-7. Institutional buying or selling pressure
+Consider:
+Market Structure,
+HH/HL,
+LH/LL,
+Momentum,
+Order Flow,
+Breakout,
+Rejection,
+Buying Pressure,
+Selling Pressure.
 
-Return ONLY valid JSON.
-
-The JSON must contain exactly:
+Return ONLY valid JSON:
 
 {
-  "signal": "BUY" or "SELL",
-  "analysis": "detailed explanation in pure Hindi"
+ "signal": "BUY" or "SELL",
+ "analysis": "detailed explanation in Hindi"
 }
 
-Do not add markdown.
-Do not add ```json.
-Do not add extra keys.
+No markdown.
+No code fence.
+No extra keys.
 """
 
     user_prompt = f"""
 Symbol: {symbol}
 
-Analyze these latest 1-minute candles:
+Latest 1-minute candles:
 
 {candle_text}
 
-Choose the strongest directional signal:
-BUY or SELL.
-
-Explain the reasoning in Hindi.
+Choose BUY or SELL.
+Explain the decision in Hindi.
 """
+
+    content = groq_request(
+        messages=[
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": user_prompt
+            }
+        ],
+        max_tokens=500,
+        temperature=0.2,
+        response_format={
+            "type": "json_object"
+        }
+    )
 
     try:
 
-        content = groq_request(
-            messages=[
-                {
-                    "role": "system",
-                    "content": system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": user_prompt
-                }
-            ],
-            max_tokens=500,
-            temperature=0.2,
-            response_format={
-                "type": "json_object"
-            }
+        data = json.loads(
+            content
         )
 
-        data = json.loads(content)
-
-        signal = str(
-            data.get(
-                "signal",
-                "BUY"
-            )
-        ).upper().strip()
-
-        analysis = str(
-            data.get(
-                "analysis",
-                "विश्लेषण उपलब्ध नहीं है।"
-            )
-        )
-
-        if signal not in [
-            "BUY",
-            "SELL"
-        ]:
-
-            signal = "BUY"
-
-        return signal, analysis
-
-    except Exception as e:
+    except Exception:
 
         raise Exception(
-            f"AI Signal Error: {e}"
+            "AI invalid JSON दे रहा है: "
+            + content[:1000]
         )
+
+    signal = str(
+        data.get(
+            "signal",
+            ""
+        )
+    ).upper().strip()
+
+    analysis = str(
+        data.get(
+            "analysis",
+            "विश्लेषण उपलब्ध नहीं है।"
+        )
+    )
+
+    if signal not in (
+        "BUY",
+        "SELL"
+    ):
+
+        raise Exception(
+            f"Invalid AI signal: {signal}"
+        )
+
+    return signal, analysis
 
 
 # ============================================================
-# DELTA POSITION
+# POSITION
 # ============================================================
 
 def get_position(product_id):
@@ -653,7 +642,7 @@ def place_market_order(
 
 
 # ============================================================
-# GET ENTRY PRICE
+# ENTRY PRICE
 # ============================================================
 
 def get_entry_price(
@@ -661,7 +650,7 @@ def get_entry_price(
     symbol
 ):
 
-    possible_fields = [
+    fields = [
         "average_fill_price",
         "avg_fill_price",
         "fill_price",
@@ -669,56 +658,51 @@ def get_entry_price(
         "limit_price"
     ]
 
-    for field in possible_fields:
+    for field in fields:
 
         value = order_result.get(
             field
         )
 
-        if value not in [
+        if value not in (
             None,
             "",
             0,
             "0"
-        ]:
+        ):
 
             try:
-
                 return float(value)
-
             except Exception:
-
                 pass
 
-    # Fallback to ticker
-    ticker = get_ticker(symbol)
+    ticker = get_ticker(
+        symbol
+    )
 
-    possible_ticker_fields = [
+    fields = [
         "mark_price",
         "close",
         "last_price",
         "spot_price"
     ]
 
-    for field in possible_ticker_fields:
+    for field in fields:
 
         value = ticker.get(
             field
         )
 
-        if value not in [
+        if value not in (
             None,
             "",
             0,
             "0"
-        ]:
+        ):
 
             try:
-
                 return float(value)
-
             except Exception:
-
                 pass
 
     raise Exception(
@@ -727,18 +711,53 @@ def get_entry_price(
 
 
 # ============================================================
-# TP + SL BRACKET ORDER
+# PRICE PRECISION
 # ============================================================
-#
-# IMPORTANT:
-# Delta API does NOT use:
-# order_type = "stop_order"
-#
-# Instead:
-# order_type = "market_order" / "limit_order"
-# stop_price = trigger price
-#
-# Bracket endpoint handles TP + SL together.
+
+def get_price_precision(symbol):
+
+    product = get_product(
+        symbol
+    )
+
+    if not product:
+        return 4
+
+    tick_size = product.get(
+        "tick_size"
+    )
+
+    try:
+
+        tick = float(
+            tick_size
+        )
+
+        if tick > 0:
+
+            text = (
+                f"{tick:.10f}"
+                .rstrip("0")
+            )
+
+            if "." in text:
+
+                return min(
+                    len(
+                        text.split(".")[1]
+                    ),
+                    10
+                )
+
+    except Exception:
+
+        pass
+
+    return 4
+
+
+# ============================================================
+# TP + SL BRACKET
 # ============================================================
 
 def place_sl_tp_orders(
@@ -753,89 +772,44 @@ def place_sl_tp_orders(
 
     if entry_side == "buy":
 
-        exit_side = "sell"
-
         stop_price = (
-            entry_price *
-            (1 - SL_PERCENT)
+            entry_price
+            * (1 - SL_PERCENT)
         )
 
         target_price = (
-            entry_price *
-            (1 + TP_PERCENT)
+            entry_price
+            * (1 + TP_PERCENT)
         )
 
     else:
 
-        exit_side = "buy"
-
         stop_price = (
-            entry_price *
-            (1 + SL_PERCENT)
+            entry_price
+            * (1 + SL_PERCENT)
         )
 
         target_price = (
-            entry_price *
-            (1 - TP_PERCENT)
+            entry_price
+            * (1 - TP_PERCENT)
         )
 
-    # --------------------------------------------------------
-    # Product info for price precision
-    # --------------------------------------------------------
-
-    product = get_product(
+    precision = get_price_precision(
         symbol
     )
 
-    # Default precision
-    price_precision = 4
+    stop_text = (
+        f"{stop_price:.{precision}f}"
+    )
 
-    if product:
+    target_text = (
+        f"{target_price:.{precision}f}"
+    )
 
-        tick_size = product.get(
-            "tick_size"
-        )
-
-        if tick_size:
-
-            try:
-
-                tick = float(
-                    tick_size
-                )
-
-                if tick > 0:
-
-                    text = (
-                        f"{tick:.10f}"
-                        .rstrip("0")
-                    )
-
-                    if "." in text:
-
-                        decimals = len(
-                            text.split(".")[1]
-                        )
-
-                        price_precision = min(
-                            max(
-                                decimals,
-                                0
-                            ),
-                            10
-                        )
-
-            except Exception:
-
-                pass
-
-    stop_text = f"{stop_price:.{price_precision}f}"
-
-    target_text = f"{target_price:.{price_precision}f}"
-
-    # --------------------------------------------------------
-    # BRACKET ORDER
-    # --------------------------------------------------------
+    # Delta bracket order:
+    # SL = market order triggered at stop_price
+    # TP = limit order triggered at stop_price
+    # Bracket closes the open position.
 
     body = {
         "product_symbol": symbol,
@@ -883,7 +857,7 @@ def place_sl_tp_orders(
 
 
 # ============================================================
-# CHAT SYSTEM
+# CHAT
 # ============================================================
 
 def ask_chat(
@@ -891,34 +865,6 @@ def ask_chat(
     user_message
 ):
 
-    system_prompt = f"""
-आप GYAN AI Pro के professional crypto trading mentor हैं।
-
-Current Symbol:
-{symbol}
-
-आपको:
-- Market structure
-- Price action
-- Momentum
-- Support / Resistance
-- Trend
-- Scalping
-- Intraday
-- Risk management
-
-के बारे में सरल लेकिन professional Hindi में जवाब देना है।
-
-यदि user किसी coin की current trading स्थिति पूछता है,
-तो उपलब्ध market data के आधार पर जवाब दें।
-
-बिना data के guaranteed profit का दावा न करें।
-
-User का सवाल:
-{user_message}
-"""
-
-    # Get live ticker for chat context
     ticker_text = ""
 
     try:
@@ -927,34 +873,65 @@ User का सवाल:
             symbol
         )
 
-        ticker_text = (
-            "\n\nLIVE TICKER DATA:\n"
-            + json.dumps(
-                ticker,
-                ensure_ascii=False
-            )[:5000]
-        )
+        ticker_text = json.dumps(
+            ticker,
+            ensure_ascii=False
+        )[:5000]
 
     except Exception as e:
 
         ticker_text = (
-            "\n\nTicker unavailable: "
+            "Ticker unavailable: "
             + str(e)
         )
+
+    system_prompt = f"""
+आप GYAN AI Pro के professional
+crypto trading mentor हैं।
+
+Current Symbol:
+{symbol}
+
+आप Hindi में जवाब दें।
+
+Topics:
+Price Action
+Market Structure
+Momentum
+Support Resistance
+Trend
+Scalping
+Intraday
+Risk Management
+
+Live ticker:
+
+{ticker_text}
+
+Guaranteed profit का दावा न करें।
+"""
+
+    history = (
+        st.session_state.messages[-10:]
+    )
 
     messages = [
         {
             "role": "system",
             "content": system_prompt
-        },
-        {
-            "role": "user",
-            "content": (
-                user_message
-                + ticker_text
-            )
         }
     ]
+
+    messages.extend(
+        history
+    )
+
+    messages.append(
+        {
+            "role": "user",
+            "content": user_message
+        }
+    )
 
     return groq_request(
         messages=messages,
@@ -967,42 +944,62 @@ User का सवाल:
 # HEADER
 # ============================================================
 
-st.title("⚡ GYAN AI Pro")
+st.title(
+    "⚡ GYAN AI Pro"
+)
 
 st.caption(
-    "Delta Exchange India • AI Scalping • TP/SL Bracket • GPT-OSS 120B"
+    "Delta Exchange India • "
+    "AI Scalping • TP/SL • GPT-OSS 120B"
 )
 
 
 # ============================================================
-# API STATUS
+# STATUS
 # ============================================================
 
-col1, col2, col3 = st.columns(3)
+c1, c2, c3 = st.columns(3)
 
-with col1:
+with c1:
 
-    if DELTA_API_KEY and DELTA_API_SECRET:
-        st.success("Delta API: READY")
+    if (
+        DELTA_API_KEY
+        and DELTA_API_SECRET
+    ):
+
+        st.success(
+            "Delta API: READY"
+        )
+
     else:
-        st.error("Delta API: KEY MISSING")
 
-with col2:
+        st.error(
+            "Delta API: KEY MISSING"
+        )
+
+with c2:
 
     if GROQ_API_KEY:
-        st.success("Groq AI: READY")
-    else:
-        st.error("Groq API: KEY MISSING")
 
-with col3:
+        st.success(
+            "Groq AI: READY"
+        )
+
+    else:
+
+        st.error(
+            "Groq API: KEY MISSING"
+        )
+
+with c3:
 
     st.info(
-        f"AI Model: {GROQ_MODEL}"
+        f"Model: {GROQ_MODEL}"
     )
 
 
 # ============================================================
-# SYMBOL LIST
+# SYMBOLS
 # ============================================================
 
 try:
@@ -1021,12 +1018,10 @@ if not symbols:
         "ETHUSD"
     ]
 
-default_symbol = "ARCUSD"
-
-if default_symbol in symbols:
+if "ARCUSD" in symbols:
 
     default_index = symbols.index(
-        default_symbol
+        "ARCUSD"
     )
 
 else:
@@ -1047,7 +1042,7 @@ tab1, tab2 = st.tabs(
 
 
 # ============================================================
-# TAB 1
+# SCALPING TERMINAL
 # ============================================================
 
 with tab1:
@@ -1065,7 +1060,8 @@ with tab1:
         symbol = st.selectbox(
             "Trading Symbol",
             symbols,
-            index=default_index
+            index=default_index,
+            key="trade_symbol"
         )
 
     with col2:
@@ -1077,14 +1073,10 @@ with tab1:
 
     refresh_seconds = st.slider(
         "Refresh Interval (seconds)",
-        min_value=5,
-        max_value=60,
-        value=10
+        5,
+        60,
+        10
     )
-
-    # --------------------------------------------------------
-    # TICKER
-    # --------------------------------------------------------
 
     ticker = {}
 
@@ -1119,23 +1111,23 @@ with tab1:
         or 0
     )
 
-    c1, c2, c3 = st.columns(3)
+    a, b, c = st.columns(3)
 
-    with c1:
+    with a:
 
         st.metric(
             "Price",
             str(price)
         )
 
-    with c2:
+    with b:
 
         st.metric(
             "Mark Price",
             str(mark_price)
         )
 
-    with c3:
+    with c:
 
         st.metric(
             "Volume",
@@ -1144,24 +1136,29 @@ with tab1:
 
     st.divider()
 
-    # --------------------------------------------------------
-    # RUN SCALPING
-    # --------------------------------------------------------
-
-    if st.button(
+    run_signal = st.button(
         "🚀 RUN AI SIGNAL",
         use_container_width=True
-    ):
+    )
 
-        if not DELTA_API_KEY or not DELTA_API_SECRET:
+    if run_signal:
+
+        if (
+            not DELTA_API_KEY
+            or not DELTA_API_SECRET
+        ):
 
             st.error(
-                "पहले Delta API Key और Secret सेट करें।"
+                "Delta API Key और Secret missing हैं।"
             )
 
         else:
 
             try:
+
+                # --------------------------------------------
+                # PRODUCT
+                # --------------------------------------------
 
                 product = get_product(
                     symbol
@@ -1183,9 +1180,9 @@ with tab1:
                         f"{symbol} का product_id नहीं मिला।"
                     )
 
-                # ------------------------------------------------
-                # EXISTING POSITION CHECK
-                # ------------------------------------------------
+                # --------------------------------------------
+                # POSITION CHECK
+                # --------------------------------------------
 
                 current_position = get_position(
                     product_id
@@ -1194,19 +1191,19 @@ with tab1:
                 if abs(current_position) > 0:
 
                     st.warning(
-                        f"Existing position detected: "
+                        f"Existing position: "
                         f"{current_position}. "
-                        f"नई trade नहीं लगाई गई।"
+                        "नई trade नहीं लगाई गई।"
                     )
 
                 else:
 
-                    # ------------------------------------------------
+                    # ----------------------------------------
                     # CANDLES
-                    # ------------------------------------------------
+                    # ----------------------------------------
 
                     with st.spinner(
-                        "1-minute market data पढ़ रहा हूँ..."
+                        "Market data पढ़ रहा हूँ..."
                     ):
 
                         candles = get_candles(
@@ -1221,12 +1218,12 @@ with tab1:
 
                     else:
 
-                        # ------------------------------------------------
-                        # AI SIGNAL
-                        # ------------------------------------------------
+                        # ------------------------------------
+                        # AI
+                        # ------------------------------------
 
                         with st.spinner(
-                            "GPT-OSS 120B market analyze कर रहा है..."
+                            "GPT-OSS 120B analyze कर रहा है..."
                         ):
 
                             signal, analysis = (
@@ -1236,13 +1233,13 @@ with tab1:
                                 )
                             )
 
-                        st.session_state.last_signal = signal
+                        st.session_state.last_signal = (
+                            signal
+                        )
 
-                        st.session_state.last_analysis = analysis
-
-                        # ------------------------------------------------
-                        # SIGNAL DISPLAY
-                        # ------------------------------------------------
+                        st.session_state.last_analysis = (
+                            analysis
+                        )
 
                         if signal == "BUY":
 
@@ -1260,9 +1257,9 @@ with tab1:
                             analysis
                         )
 
-                        # ------------------------------------------------
-                        # ORDER SIDE
-                        # ------------------------------------------------
+                        # ------------------------------------
+                        # SIDE
+                        # ------------------------------------
 
                         side = (
                             "buy"
@@ -1270,12 +1267,12 @@ with tab1:
                             else "sell"
                         )
 
-                        # ------------------------------------------------
-                        # MARKET ENTRY
-                        # ------------------------------------------------
+                        # ------------------------------------
+                        # ENTRY
+                        # ------------------------------------
 
                         with st.spinner(
-                            f"{side.upper()} market order लगाया जा रहा है..."
+                            f"{side.upper()} order लगाया जा रहा है..."
                         ):
 
                             order_result = (
@@ -1290,16 +1287,16 @@ with tab1:
                         )
 
                         st.success(
-                            "Market order successfully placed."
+                            "✅ Market order placed."
                         )
 
                         st.json(
                             order_result
                         )
 
-                        # ------------------------------------------------
+                        # ------------------------------------
                         # ENTRY PRICE
-                        # ------------------------------------------------
+                        # ------------------------------------
 
                         entry_price = get_entry_price(
                             order_result,
@@ -1310,9 +1307,9 @@ with tab1:
                             f"**Entry Price:** `{entry_price}`"
                         )
 
-                        # ------------------------------------------------
+                        # ------------------------------------
                         # TP + SL
-                        # ------------------------------------------------
+                        # ------------------------------------
 
                         with st.spinner(
                             "TP + SL bracket लगा रहा हूँ..."
@@ -1330,36 +1327,36 @@ with tab1:
                             bracket_result
                         )
 
-                        # ------------------------------------------------
-                        # BRACKET RESULT
-                        # ------------------------------------------------
+                        # ------------------------------------
+                        # RESULT
+                        # ------------------------------------
 
                         if bracket_result.get(
                             "success"
                         ):
 
                             st.success(
-                                "✅ TP + SL दोनों successfully लग गए।"
+                                "✅ TP + SL दोनों लग गए।"
                             )
 
-                            b1, b2 = st.columns(2)
+                            x, y = st.columns(2)
 
-                            with b1:
+                            with x:
 
                                 st.metric(
                                     "Stop Loss",
-                                    bracket_result.get(
+                                    bracket_result[
                                         "stop_loss"
-                                    )
+                                    ]
                                 )
 
-                            with b2:
+                            with y:
 
                                 st.metric(
                                     "Take Profit",
-                                    bracket_result.get(
+                                    bracket_result[
                                         "take_profit"
-                                    )
+                                    ]
                                 )
 
                             with st.expander(
@@ -1372,12 +1369,10 @@ with tab1:
                                     )
                                 )
 
-                            st.balloons()
-
                         else:
 
                             st.error(
-                                "❌ TP/SL bracket लगाने में error आया।"
+                                "❌ TP/SL लगाने में error आया।"
                             )
 
                             st.code(
@@ -1388,9 +1383,23 @@ with tab1:
                                 )
                             )
 
-    # --------------------------------------------------------
+            # =================================================
+            # THIS WAS MISSING IN YOUR CODE
+            # =================================================
+
+            except Exception as e:
+
+                st.error(
+                    "❌ Trading / AI Error"
+                )
+
+                st.code(
+                    f"{type(e).__name__}: {e}"
+                )
+
+    # ========================================================
     # LAST SIGNAL
-    # --------------------------------------------------------
+    # ========================================================
 
     if st.session_state.last_signal:
 
@@ -1401,21 +1410,25 @@ with tab1:
         )
 
         st.write(
-            f"Signal: **{st.session_state.last_signal}**"
+            "Signal: "
+            + str(
+                st.session_state.last_signal
+            )
         )
 
         st.write(
             st.session_state.last_analysis
         )
 
-    # --------------------------------------------------------
-    # AUTO TRADE
-    # --------------------------------------------------------
+    # ========================================================
+    # AUTO REFRESH
+    # ========================================================
 
     if auto_trade:
 
         st.warning(
-            f"Auto Trade ON — हर {refresh_seconds} sec में scan होगा।"
+            f"Auto Trade ON — "
+            f"हर {refresh_seconds} sec refresh होगा।"
         )
 
         time.sleep(
@@ -1426,7 +1439,7 @@ with tab1:
 
 
 # ============================================================
-# TAB 2 — AI CHAT
+# AI CHAT
 # ============================================================
 
 with tab2:
@@ -1447,11 +1460,11 @@ with tab2:
     )
 
     st.caption(
-        f"Current Chat Symbol: {chat_symbol}"
+        f"Current Symbol: {chat_symbol}"
     )
 
     # --------------------------------------------------------
-    # CHAT HISTORY
+    # HISTORY
     # --------------------------------------------------------
 
     for message in st.session_state.messages:
@@ -1465,7 +1478,7 @@ with tab2:
             )
 
     # --------------------------------------------------------
-    # CHAT INPUT
+    # INPUT
     # --------------------------------------------------------
 
     user_message = st.chat_input(
@@ -1474,7 +1487,6 @@ with tab2:
 
     if user_message:
 
-        # User message
         st.session_state.messages.append(
             {
                 "role": "user",
@@ -1490,7 +1502,6 @@ with tab2:
                 user_message
             )
 
-        # AI response
         with st.chat_message(
             "assistant"
         ):
@@ -1526,8 +1537,8 @@ with tab2:
                 except Exception as e:
 
                     error_message = (
-                        f"❌ Chat API Error\n\n"
-                        f"`{type(e).__name__}: {str(e)}`"
+                        "❌ Chat API Error\n\n"
+                        f"`{type(e).__name__}: {e}`"
                     )
 
                     st.error(
@@ -1542,7 +1553,7 @@ with tab2:
                     )
 
     # --------------------------------------------------------
-    # CLEAR CHAT
+    # CLEAR
     # --------------------------------------------------------
 
     if st.button(
